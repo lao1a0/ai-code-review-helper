@@ -1,10 +1,12 @@
-import re
-import hmac
 import hashlib
-from functools import wraps
-from flask import request, abort
-from api.core_config import ADMIN_API_KEY
+import hmac
 import logging
+import re
+from functools import wraps
+
+from flask import request, abort
+
+from api.core_config import ADMIN_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -14,13 +16,8 @@ def parse_single_file_diff(diff_text, file_path, old_file_path=None):
     解析单个文件的 unified diff 格式文本，提取变更信息。
     返回包含该文件变更详情和上下文的字典。
     """
-    file_changes = {
-        "path": file_path,
-        "old_path": old_file_path,
-        "changes": [],
-        "context": {"old": [], "new": []},
-        "lines_changed": 0
-    }
+    file_changes = {"path": file_path, "old_path": old_file_path, "changes": [], "context": {"old": [], "new": []},
+                    "lines_changed": 0}
 
     old_line_num_start = 0
     new_line_num_start = 0
@@ -53,20 +50,12 @@ def parse_single_file_diff(diff_text, file_path, old_file_path=None):
                 old_line_num_current = 0
                 new_line_num_current = 0
         elif line.startswith('+'):
-            file_changes["changes"].append({
-                "type": "add",
-                "old_line": None,
-                "new_line": new_line_num_current,
-                "content": line[1:]
-            })
+            file_changes["changes"].append(
+                {"type": "add", "old_line": None, "new_line": new_line_num_current, "content": line[1:]})
             new_line_num_current += 1
         elif line.startswith('-'):
-            file_changes["changes"].append({
-                "type": "delete",
-                "old_line": old_line_num_current,
-                "new_line": None,
-                "content": line[1:]
-            })
+            file_changes["changes"].append(
+                {"type": "delete", "old_line": old_line_num_current, "new_line": None, "content": line[1:]})
             old_line_num_current += 1
         elif line.startswith(' '):  # Context line
             hunk_context_lines.append(f"{old_line_num_current} -> {new_line_num_current}: {line[1:]}")

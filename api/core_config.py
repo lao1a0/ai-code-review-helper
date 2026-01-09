@@ -19,6 +19,8 @@ app_configs = {
     "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
     "OPENAI_MODEL": os.environ.get("OPENAI_MODEL", "gpt-4o"),
     "GITHUB_API_URL": os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+    "GITHUB_ACCESS_TOKEN": os.environ.get("GITHUB_ACCESS_TOKEN", ""),
+    "GITLAB_API_URL": os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
     "GITLAB_INSTANCE_URL": os.environ.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
     "WECOM_BOT_WEBHOOK_URL": os.environ.get("WECOM_BOT_WEBHOOK_URL", ""),
     # Redis 配置 (新增)
