@@ -166,6 +166,8 @@ def list_reviewed_prs_mrs():
     reviewed_items = get_all_reviewed_prs_mrs_keys()
     if reviewed_items is None:  # 可能因为 Redis 错误返回 None
         return jsonify({"error": "无法从 Redis 获取审查结果列表。"}), 500
+    # Sort by created_at ascending (oldest first)
+    reviewed_items.sort(key=lambda x: x.get('created_at', ''), reverse=False)
     return jsonify({"reviewed_pr_mr_list": reviewed_items}), 200
 
 

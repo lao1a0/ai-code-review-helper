@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI审查记录 - AI Code Review Helper</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_styles.css') }}">
+    <style>
+        .review-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #ddd;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .review-item:hover {
+            background-color: #f0f0f0;
+        }
+        .review-info {
+            flex-grow: 1;
+        }
+        .review-info div {
+            margin-bottom: 5px;
+        }
+        .review-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .review-actions button {
+            padding: 5px 10px;
+            font-size: 0.9em;
+        }
+        .review-details {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+            display: none;
+        }
+        .review-details .issue-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+        }
+        .review-details .issue-title {
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 8px;
+        }
+        .review-details .issue-analysis,
+        .review-details .issue-suggestion {
+            margin: 5px 0;
+            line-height: 1.4;
+        }
+        .review-details .issue-analysis:before {
+            content: "分析: ";
+            font-weight: bold;
+        }
+        .review-details .issue-suggestion:before {
+            content: "建议: ";
+            font-weight: bold;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-has-issues {
+            background-color: #dc3545;
+        }
+        .status-no-issues {
+            background-color: #28a745;
+        }
+        .status-unknown {
+            background-color: #ffc107;
+        }
+        .review-container {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <h1>AI审查记录</h1>
+    <p>查看所有AI代码审查的结果</p>
+    <a href="/admin" class="back-link">← 返回管理面板</a>
+</div>
+
+<div class="main-content">
+    <div class="container">
+        <h1>AI审查记录</h1>
+        <p>以下是所有已处理的AI代码审查记录，按时间从早到晚排序。</p>
+        <button id="refreshList">刷新列表</button>
+
+        <div id="reviewList">
+            <!-- Review items will be populated here -->
+        </div>
+    </div>
+</div>
+
+<script>
+    const reviewListDiv = document.getElementById('reviewList');
+    const refreshButton = document.getElementById('refreshList');
+
+    async function loadReviewList() {
+        refreshButton.disabled = true;
+        refreshButton.textContent = '正在加载...';
+
+        try {
+            const response = await fetch('/config/review_results/list', {
+                headers: {
+                    'X-Admin-API-Key': getApiKey()
+                }
+            });
+
+            if (response.status === 401) {
+                alert('需要Admin API Key，请先访问管理面板设置。');
+                window.location.href = '/admin';
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            displayReviewList(data.reviewed_pr_mr_list);
+        } catch (error) {
+            console.error('加载审查记录失败:', error);
+            reviewListDiv.innerHTML = '<p>加载失败，请检查网络连接或API Key设置。</p>';
+        } finally {
+            refreshButton.disabled = false;
+            refreshButton.textContent = '刷新列表';
+        }
+    }
+
+    function displayReviewList(reviews) {
+        if (!reviews || reviews.length === 0) {
+            reviewListDiv.innerHTML = '<p>暂无审查记录。</p>';
+            return;
+        }
+
+        const html = reviews.map(review => {
+            const time = review.created_at ? new Date(review.created_at).toLocaleString('zh-CN') : '未知';
+            const repo = review.project_name || review.identifier;
+            const branch = review.branch || '未知';
+            const commit = review.last_commit_sha ? review.last_commit_sha.substring(0, 12) : '未知';
+            const displayName = review.display_name;
+
+            // Determine if there are issues (simplified logic)
+            const hasIssues = review.vcs_type.includes('detailed') || review.vcs_type.includes('general');
+            const statusClass = hasIssues ? 'status-has-issues' : 'status-no-issues';
+            const statusText = hasIssues ? '有问题' : '无问题';
+
+            return `
+                <div class="review-container">
+                    <div class="review-item">
+                        <div class="review-info">
+                            <div><strong>时间:</strong> ${time}</div>
+                            <div><strong>仓库/项目:</strong> ${repo}</div>
+                            <div><strong>分支:</strong> ${branch}</div>
+                            <div><strong>提交ID:</strong> ${commit}</div>
+                            <div><strong>审计结果:</strong> <span class="status-indicator ${statusClass}"></span>${statusText}</div>
+                            <div><em>${displayName}</em></div>
+                        </div>
+                        <div class="review-actions">
+                            <button onclick="viewDetails('${review.vcs_type}', '${review.identifier}', '${review.pr_mr_id}', '${review.branch || ''}', '${review.last_commit_sha || ''}', this)">查看详情</button>
+                            <button class="delete-btn" onclick="deleteReview('${review.vcs_type}', '${review.identifier}', '${review.pr_mr_id}', this)">删除</button>
+                        </div>
+                    </div>
+                    <div class="review-details" id="details-${review.vcs_type}-${review.identifier}-${review.pr_mr_id}"></div>
+                </div>
+            `;
+        }).join('');
+
+        reviewListDiv.innerHTML = html;
+    }
+
+    async function viewDetails(vcsType, identifier, prMrId, branch, commitSha, buttonElement) {
+        const detailsDiv = document.getElementById(`details-${vcsType}-${identifier}-${prMrId}`);
+        const isExpanded = detailsDiv.style.display === 'block';
+
+        if (isExpanded) {
+            // Collapse
+            detailsDiv.style.display = 'none';
+            buttonElement.textContent = '查看详情';
+            return;
+        }
+
+        // Expand and load data if not already loaded
+        if (!detailsDiv.dataset.loaded) {
+            buttonElement.disabled = true;
+            buttonElement.textContent = '加载中...';
+
+            try {
+                const response = await fetch(`/config/review_results/${vcsType}/${encodeURIComponent(identifier)}/${prMrId}`, {
+                    headers: {
+                        'X-Admin-API-Key': getApiKey()
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                const formattedContent = formatReviewDetails(data, vcsType, identifier, prMrId, branch, commitSha);
+                detailsDiv.innerHTML = formattedContent;
+                detailsDiv.dataset.loaded = 'true';
+            } catch (error) {
+                console.error('加载详情失败:', error);
+                detailsDiv.innerHTML = '<p>加载详情失败，请检查网络连接。</p>';
+            } finally {
+                buttonElement.disabled = false;
+                buttonElement.textContent = '收起详情';
+            }
+        } else {
+            buttonElement.textContent = '收起详情';
+        }
+
+        detailsDiv.style.display = 'block';
+    }
+
+    function formatReviewDetails(data, vcsType, identifier, prMrId, branch, commitSha) {
+        // Count issues
+        const commits = data.all_reviews_by_commit || {};
+        let totalIssues = 0;
+        for (const commitSha in commits) {
+            const reviews = commits[commitSha];
+            if (Array.isArray(reviews)) {
+                totalIssues += reviews.length;
+            }
+        }
+
+        if (totalIssues === 0) {
+            return `<div class="issue-item">
+                <div class="issue-analysis">- 结论: 未发现需要关注的问题。</div>
+            </div>`;
+        }
+
+        let content = '';
+        let issueCount = 0;
+
+        for (const commitSha in commits) {
+            const reviews = commits[commitSha];
+            if (Array.isArray(reviews)) {
+                for (const review of reviews) {
+                    if (issueCount >= 10) break; // Limit to 10 issues
+
+                    const severity = review.severity || 'UNKNOWN';
+                    const category = review.category || 'General';
+                    const file = review.file || '未知文件';
+                    const analysis = review.analysis || '';
+                    const suggestion = review.suggestion || '';
+
+                    content += `<div class="issue-item">
+                        <div class="issue-title">[${severity.toUpperCase()}] ${file} (${category})</div>`;
+
+                    if (analysis) {
+                        content += `<div class="issue-analysis">${analysis}</div>`;
+                    }
+
+                    if (suggestion) {
+                        content += `<div class="issue-suggestion">${suggestion}</div>`;
+                    }
+
+                    content += `</div>`;
+                    issueCount++;
+                }
+            }
+            if (issueCount >= 10) break;
+        }
+
+        if (Object.keys(commits).length > 1 || totalIssues > 10) {
+            content += `<div class="issue-item">
+                <div class="issue-analysis">其余 ${totalIssues - 10} 条建议请在管理面板查看。</div>
+            </div>`;
+        }
+
+        return content;
+    }
+
+    async function deleteReview(vcsType, identifier, prMrId, buttonElement) {
+        if (!confirm(`确定要删除 ${vcsType.toUpperCase()}: ${identifier} #${prMrId} 的所有审查记录吗？此操作不可恢复。`)) {
+            return;
+        }
+
+        buttonElement.disabled = true;
+        buttonElement.textContent = '删除中...';
+
+        try {
+            const response = await fetch(`/config/review_results/${vcsType}/${encodeURIComponent(identifier)}/${prMrId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-Admin-API-Key': getApiKey()
+                }
+            });
+
+            if (response.status === 401) {
+                alert('API Key无效，请重新设置。');
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            alert(result.message || '删除成功');
+            loadReviewList(); // Refresh the list
+        } catch (error) {
+            console.error('删除失败:', error);
+            alert('删除失败，请检查网络连接。');
+            buttonElement.disabled = false;
+            buttonElement.textContent = '删除';
+        }
+    }
+
+    function getApiKey() {
+        // Try to get from cookie or prompt
+        let apiKey = getCookie('ADMIN_API_KEY');
+        if (!apiKey) {
+            apiKey = prompt('请输入Admin API Key:');
+            if (apiKey) {
+                setCookie('ADMIN_API_KEY', apiKey, 7);
+            }
+        }
+        return apiKey;
+    }
+
+    function getCookie(name) {
+        const nameEQ = name + "=";
+        const ca = document.cookie.split(';');
+        for (let i = 0; i < ca.length; i++) {
+            let c = ca[i];
+            while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+            if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+        }
+        return null;
+    }
+
+    function setCookie(name, value, days) {
+        let expires = "";
+        if (days) {
+            const date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            expires = "; expires=" + date.toUTCString();
+        }
+        document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax";
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshButton.addEventListener('click', loadReviewList);
+        loadReviewList();
+    });
+</script>
+</body>
+</html>

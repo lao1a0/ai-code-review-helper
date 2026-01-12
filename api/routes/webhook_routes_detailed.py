@@ -58,7 +58,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
     if not structured_changes:
         logger.info("GitHub (详细审查): 解析后未检测到变更。无需审查。")
         _save_review_results_and_log(vcs_type='github', identifier=repo_full_name, pr_mr_id=str(pull_number),
-            commit_sha=head_sha, review_json_string=json.dumps([]))
+            commit_sha=head_sha, review_json_string=json.dumps([]), branch=pr_source_branch)
         mark_commit_as_processed('github', repo_full_name, str(pull_number), head_sha)
         return
 
@@ -115,7 +115,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
                 f"GitHub (详细审查): 序列化最终审查列表到 JSON 时出错: {e}")  # 保留 final_review_json_for_redis 为 "[]"
 
     _save_review_results_and_log(vcs_type='github', identifier=repo_full_name, pr_mr_id=str(pull_number),
-        commit_sha=head_sha, review_json_string=final_review_json_for_redis)
+        commit_sha=head_sha, review_json_string=final_review_json_for_redis, branch=pr_source_branch)
 
     # 如果没有任何评论被成功发布 (或 all_reviews_for_redis 为空)
     if not all_reviews_for_redis:  # 或者 total_comments_posted_successfully == 0
@@ -251,7 +251,7 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
         logger.info("GitLab (详细审查): 解析后未检测到变更。无需审查。")
         _save_review_results_and_log(vcs_type='gitlab', identifier=project_id_str, pr_mr_id=str(mr_iid),
             commit_sha=head_sha_payload, review_json_string=json.dumps([]),
-            project_name_for_gitlab=project_name_from_payload)
+            project_name_for_gitlab=project_name_from_payload, branch=mr_attrs.get('source_branch'))
         mark_commit_as_processed('gitlab', project_id_str, str(mr_iid), head_sha_payload)
         return
 
@@ -270,7 +270,7 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
 
     _save_review_results_and_log(vcs_type='gitlab', identifier=project_id_str, pr_mr_id=str(mr_iid),
         commit_sha=current_commit_sha_for_saving, review_json_string=review_result_json,
-        project_name_for_gitlab=project_name_from_payload)
+        project_name_for_gitlab=project_name_from_payload, branch=mr_attrs.get('source_branch'))
 
     reviews = []
     try:

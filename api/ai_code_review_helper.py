@@ -52,6 +52,12 @@ def admin_page():
     return render_template('admin.html')
 
 
+@app.route('/review_results')
+def review_results_page():
+    """提供AI审查记录查看页面的 HTML 页面"""
+    return render_template('review_results.html')
+
+
 @app.route('/')
 def index():
     return redirect('/admin')

@@ -15,7 +15,7 @@
         <li><a href="#" id="navLlmSettings">LLM 配置</a></li>
         <li><a href="#" id="navNotificationSettings">通知配置</a></li>
         <li><a href="#" id="navApiKeySettings">API 密钥设置</a></li>
-        <li><a href="#" id="navAiReviewResults">AI 审查记录</a></li>
+        <li><a href="/review_results" target="_blank" id="navReviewResults">AI 审查记录</a></li>
     </ul>
 </div>
 
@@ -123,20 +123,7 @@
             </div>
         </div>
 
-        <!-- AI Code Review Results Section -->
-        <div id="aiReviewResultsSection" class="content-section">
-            <div class="config-section">
-                <h2>AI 审查记录</h2>
-                <p>点击下面的 PR/MR 查看详细的 AI 审查结果。</p>
-                <button id="refreshReviewResultsList">刷新列表</button>
-                <ul id="reviewedPrMrList" class="pr-mr-list">
-                    <!-- List of PRs/MRs will be populated here -->
-                </ul>
-                <div id="reviewDetailsContainer">
-                    <!-- Detailed reviews for a selected PR/MR will be shown here -->
-                </div>
-            </div>
-        </div>
+
     </div>
 </div>
 
@@ -149,14 +136,12 @@
     const navLlmSettings = document.getElementById('navLlmSettings');
     const navNotificationSettings = document.getElementById('navNotificationSettings');
     const navApiKeySettings = document.getElementById('navApiKeySettings'); // 新增
-    const navAiReviewResults = document.getElementById('navAiReviewResults'); // 新增 for AI Review Results
 
     const githubSection = document.getElementById('githubSection');
     const gitlabSection = document.getElementById('gitlabSection');
     const llmSettingsSection = document.getElementById('llmSettingsSection');
     const notificationSettingsSection = document.getElementById('notificationSettingsSection');
     const apiKeySettingsSection = document.getElementById('apiKeySettingsSection'); // 新增
-    const aiReviewResultsSection = document.getElementById('aiReviewResultsSection'); // 新增 for AI Review Results
     // settingsSection is removed
 
     // Helper functions for cookies
@@ -189,8 +174,7 @@
         llmSettingsSection.classList.remove('active');
         notificationSettingsSection.classList.remove('active');
         apiKeySettingsSection.classList.remove('active'); // 新增
-        aiReviewResultsSection.classList.remove('active'); // 新增
-        // settingsSection.classList.remove('active'); // Removed
+        // settingsSection is removed
 
         // Deactivate all nav links
         navGithub.classList.remove('active');
@@ -198,8 +182,7 @@
         navLlmSettings.classList.remove('active');
         navNotificationSettings.classList.remove('active');
         navApiKeySettings.classList.remove('active'); // 新增
-        navAiReviewResults.classList.remove('active'); // 新增
-        // navSettings.classList.remove('active'); // Removed
+        // navSettings is removed
 
         // Show the selected section and activate its nav link
         if (sectionToShow === 'github') {
@@ -217,10 +200,6 @@
         } else if (sectionToShow === 'apiKeySettings') { // 新增
             apiKeySettingsSection.classList.add('active');
             navApiKeySettings.classList.add('active');
-        } else if (sectionToShow === 'aiReviewResults') { // 新增
-            aiReviewResultsSection.classList.add('active');
-            navAiReviewResults.classList.add('active');
-            loadReviewedPrMrList(); // Load the list when section is shown
         }
         // Removed 'settings' section logic
     }
@@ -244,10 +223,6 @@
     navApiKeySettings.addEventListener('click', (e) => { // 新增
         e.preventDefault();
         showSection('apiKeySettings');
-    });
-    navAiReviewResults.addEventListener('click', (e) => { // 新增
-        e.preventDefault();
-        showSection('aiReviewResults');
     });
 
     // navSettings event listener removed
@@ -568,9 +543,6 @@
             await loadGithubRepos();
             await loadGitlabProjects();
             await loadGlobalSettings(); // Reload global settings
-            if (aiReviewResultsSection.classList.contains('active')) { // If review section is active, reload its list
-                loadReviewedPrMrList();
-            }
         } else {
             setCookie('ADMIN_API_KEY', '', -1); // Clear cookie if input is emptied
             apiKeyStatus.textContent = 'Admin API Key 已清除。请输入有效的 Key 以继续。';
@@ -583,174 +555,7 @@
     document.addEventListener('DOMContentLoaded', async () => {
         showSection('github'); // Set GitHub as default view
         await checkAndSetApiKey(); // Handles API key logic and then loads lists
-
-        document.getElementById('refreshReviewResultsList').addEventListener('click', loadReviewedPrMrList);
     });
-
-    // --- AI Review Results Functions ---
-    const reviewedPrMrListUl = document.getElementById('reviewedPrMrList');
-    const reviewDetailsContainer = document.getElementById('reviewDetailsContainer');
-    const refreshReviewResultsListButton = document.getElementById('refreshReviewResultsList');
-
-
-    async function loadReviewedPrMrList() {
-        const originalButtonText = refreshReviewResultsListButton.textContent;
-        refreshReviewResultsListButton.disabled = true;
-        refreshReviewResultsListButton.textContent = '正在刷新...';
-
-        reviewedPrMrListUl.innerHTML = '<li>正在加载审查记录...</li>';
-        reviewDetailsContainer.innerHTML = ''; // Clear previous details
-
-        try {
-            const data = await fetchData('/config/review_results/list');
-            if (data && data.reviewed_pr_mr_list) {
-                reviewedPrMrListUl.innerHTML = '';
-                if (data.reviewed_pr_mr_list.length === 0) {
-                    reviewedPrMrListUl.innerHTML = '<li>暂无 AI 审查记录。</li>';
-                    return;
-                }
-                data.reviewed_pr_mr_list.forEach(item => {
-                    const li = document.createElement('li');
-                    li.textContent = item.display_name; // Using display_name from backend
-                    li.dataset.vcsType = item.vcs_type;
-                    li.dataset.identifier = item.identifier;
-                    li.dataset.prMrId = item.pr_mr_id;
-
-                    const textSpan = document.createElement('span');
-                    textSpan.textContent = item.display_name;
-                    textSpan.style.flexGrow = "1"; // Allow text to take available space
-                    textSpan.onclick = (event) => {
-                        const currentLi = event.currentTarget.closest('li');
-                        const allItems = reviewedPrMrListUl.querySelectorAll('li');
-                        allItems.forEach(sibling => sibling.classList.remove('active'));
-                        currentLi.classList.add('active');
-                        loadSpecificReviewDetails(item.vcs_type, item.identifier, item.pr_mr_id);
-                    };
-                    li.appendChild(textSpan);
-
-                    const deleteButton = document.createElement('button');
-                    deleteButton.textContent = '删除';
-                    deleteButton.className = 'delete-btn'; // Reuse existing delete button style
-                    deleteButton.style.marginLeft = '10px'; // Add some space
-                    deleteButton.onclick = (event) => {
-                        event.stopPropagation(); // Prevent li click event
-                        deleteReviewResult(item.vcs_type, item.identifier, item.pr_mr_id, li);
-                    };
-                    li.appendChild(deleteButton);
-
-                    reviewedPrMrListUl.appendChild(li);
-                });
-            } else if (data) { // Empty list is valid
-                reviewedPrMrListUl.innerHTML = '<li>暂无 AI 审查记录。</li>';
-            } else {
-                reviewedPrMrListUl.innerHTML = '<li>加载审查记录失败。请检查 Admin API Key 或网络。</li>';
-            }
-        } catch (error) {
-            console.error("Error in loadReviewedPrMrList:", error);
-            reviewedPrMrListUl.innerHTML = '<li>加载审查记录时发生错误。</li>';
-            showStatus('加载审查记录列表时出错。', true);
-        } finally {
-            refreshReviewResultsListButton.disabled = false;
-            refreshReviewResultsListButton.textContent = originalButtonText;
-        }
-    }
-
-    async function loadSpecificReviewDetails(vcsType, identifier, prMrId) {
-        reviewDetailsContainer.innerHTML = '<h4><i class="fas fa-spinner fa-spin"></i> 正在加载详细审查结果...</h4>'; // Improved loading message
-        const url = `/config/review_results/${vcsType}/${encodeURIComponent(identifier)}/${prMrId}`;
-        const data = await fetchData(url);
-        if (data && data.all_reviews_by_commit) {
-            const displayTitleIdentifier = data.display_identifier || identifier;
-            reviewDetailsContainer.innerHTML = ''; // 清空之前的内容
-
-            const titleElement = document.createElement('h3');
-            titleElement.textContent = `${vcsType.toUpperCase()}: ${displayTitleIdentifier} #${prMrId} 的审查结果`;
-            reviewDetailsContainer.appendChild(titleElement);
-
-            if (Object.keys(data.all_reviews_by_commit).length === 0) {
-                const noReviewsPara = document.createElement('p');
-                noReviewsPara.textContent = '此 PR/MR 没有找到具体的审查评论记录。';
-                reviewDetailsContainer.appendChild(noReviewsPara);
-                return;
-            }
-
-            for (const [commitSha, reviewDataJson] of Object.entries(data.all_reviews_by_commit)) {
-                const commitDiv = document.createElement('div');
-                commitDiv.className = 'commit-details';
-                commitDiv.innerHTML = `<h4>Commit: ${commitSha.substring(0, 12)}...</h4>`;
-
-                let reviewsArray = [];
-                try {
-                    // reviewDataJson is already an object/array from the backend if parsed correctly there
-                    // If it's a string, it needs parsing. If it's an object/array, use as is.
-                    if (typeof reviewDataJson === 'string') {
-                        reviewsArray = JSON.parse(reviewDataJson);
-                    } else {
-                        reviewsArray = reviewDataJson; // Assuming it's already parsed by backend or fetchData
-                    }
-                } catch (e) {
-                    console.error("Error parsing reviewDataJson for commit " + commitSha + ":", e);
-                    commitDiv.innerHTML += `<p>解析此 commit 的审查数据时出错。</p>`;
-                    reviewDetailsContainer.appendChild(commitDiv);
-                    continue;
-                }
-
-
-                if (reviewsArray && reviewsArray.length > 0) {
-                    reviewsArray.forEach(review => {
-                        const reviewItemDiv = document.createElement('div');
-                        reviewItemDiv.className = 'review-item';
-                        reviewItemDiv.innerHTML = `
-                            <p><strong>文件:</strong> ${review.file}</p>
-                            <p><strong>行号 (新):</strong> ${review.lines.new || 'N/A'} (旧: ${review.lines.old || 'N/A'})</p>
-                            <p><strong>分类:</strong> ${review.category} | <strong>严重性:</strong> ${review.severity}</p>
-                            <p><strong>分析:</strong> ${review.analysis}</p>
-                            <p><strong>建议:</strong></p>
-                            <pre>${review.suggestion.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
-                        `;
-                        commitDiv.appendChild(reviewItemDiv);
-                    });
-                } else {
-                    commitDiv.innerHTML += '<p>此 commit 没有审查评论。</p>';
-                }
-                reviewDetailsContainer.appendChild(commitDiv);
-            }
-
-        } else if (data && data.error) {
-            reviewDetailsContainer.innerHTML = `<p>错误: ${data.error}</p>`;
-        } else {
-            reviewDetailsContainer.innerHTML = '<p>加载详细审查结果失败。</p>';
-        }
-    }
-
-    async function deleteReviewResult(vcsType, identifier, prMrId, listItemElement) {
-        if (!confirm(`确定要删除 ${vcsType.toUpperCase()}: ${identifier} #${prMrId} 的所有审查记录吗？此操作不可恢复。`)) return;
-
-        const url = `/config/review_results/${vcsType}/${encodeURIComponent(identifier)}/${prMrId}`;
-        // fetchData's third argument is body, for DELETE it should be null or undefined.
-        // The function already handles API key and Content-Type.
-        const result = await fetchData(url, 'DELETE');
-
-        if (result && result.success) { // fetchData for DELETE returns {success: true, message: ...}
-            showStatus(result.message || '审查记录已成功删除。');
-            listItemElement.remove(); // Remove the item from the list
-
-            // If the list becomes empty, show the placeholder message
-            if (reviewedPrMrListUl.children.length === 0) {
-                reviewedPrMrListUl.innerHTML = '<li>暂无 AI 审查记录。</li>';
-            }
-            // Clear the details view as the item is gone
-            reviewDetailsContainer.innerHTML = '';
-        } else {
-            // fetchData should have shown an error status if result is null or not success
-            // If result exists but not success, it might have an error message from backend
-            if (result && result.error) {
-                showStatus(`删除失败: ${result.error}`, true);
-            } else if (!result) { // fetchData returned null (e.g. network error, or API key issue before request)
-                // showStatus('删除审查记录失败。请检查网络或API Key。', true); // fetchData already shows this
-            }
-        }
-    }
 
 </script>
 </body>

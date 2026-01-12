@@ -244,7 +244,7 @@ def _get_review_results_redis_key(vcs_type: str, identifier: str, pr_mr_id: str)
 
 
 def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str,
-                        project_name: str = None):
+                        project_name: str = None, branch: str = None, created_at: str = None):
     """将 AI 审查结果保存到 Redis。"""
     # global redis_client # redis_client is already global
     if not redis_client:
@@ -263,6 +263,13 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
             # 仅在首次或需要更新时设置项目名称
             # 如果 _project_name 已存在且不同，可以选择是否覆盖，这里简单覆盖
             pipe.hset(redis_key, "_project_name", project_name)
+
+        # 保存元数据
+        if branch:
+            pipe.hset(redis_key, "_branch", branch)
+        if created_at:
+            pipe.hset(redis_key, "_created_at", created_at)
+        pipe.hset(redis_key, "_last_commit_sha", commit_sha)  # 更新最新 commit
 
         # 为审查结果设置过期时间，例如7天，以避免无限增长
         pipe.expire(redis_key, 60 * 60 * 24 * 7)  # 7 days
@@ -299,6 +306,9 @@ def get_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha
                 try:
                     if field_str == "_project_name":
                         project_name_for_pr_mr = value_bytes.decode('utf-8')
+                    elif field_str.startswith('_'):
+                        # 元数据字段，直接存储为字符串
+                        pass  # 我们不在这里处理元数据，只处理审查结果
                     else:  # 这是一个 commit sha
                         decoded_results[field_str] = json.loads(value_bytes.decode('utf-8'))
                 except (UnicodeDecodeError, json.JSONDecodeError) as e:
@@ -380,9 +390,28 @@ def get_all_reviewed_prs_mrs_keys():
                     elif vcs_type_full == "gitlab_push":
                         display_vcs_type_prefix = "GITLAB (Push Audit)"
 
-                    identifiers.append({"key": key, "vcs_type": vcs_type_full,  # 存储原始的 vcs_type，例如 github_general
-                        "identifier": identifier_str, "pr_mr_id": pr_mr_id,
-                        "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}"})
+                    # 获取元数据
+                    metadata = {}
+                    try:
+                        all_fields = redis_client.hgetall(key)
+                        for field_bytes, value_bytes in all_fields.items():
+                            field_str = field_bytes.decode('utf-8')
+                            if field_str.startswith('_'):
+                                metadata[field_str[1:]] = value_bytes.decode('utf-8')  # 移除前缀 _
+                    except Exception as e_meta:
+                        logger.error(f"从 Redis Key '{key}' 获取元数据时出错: {e_meta}")
+
+                    identifiers.append({
+                        "key": key,
+                        "vcs_type": vcs_type_full,
+                        "identifier": identifier_str,
+                        "pr_mr_id": pr_mr_id,
+                        "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}",
+                        "created_at": metadata.get('created_at', ''),
+                        "branch": metadata.get('branch', ''),
+                        "last_commit_sha": metadata.get('last_commit_sha', ''),
+                        "project_name": metadata.get('project_name', display_identifier) if vcs_type_full.startswith('gitlab') else display_identifier
+                    })
             except Exception as e:
                 logger.error(f"解析审查结果 Redis Key '{key}' 时出错: {e}")
         return identifiers
