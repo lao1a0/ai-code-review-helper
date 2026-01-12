@@ -80,7 +80,17 @@ REDIS_PASSWORD=
 REDIS_SSL_ENABLED=false
 REDIS_DB=0
 
+# Push Audit (optional, for Git push webhook)
+PUSH_AUDIT_ENABLED=true
+PUSH_AUDIT_MAX_FILES=20
+PUSH_AUDIT_POST_COMMIT_COMMENT=true
+
 ```
+
+## 🔍 Push 审计（Git push webhook）
+- GitHub Push Webhook：`/github_push_webhook`（事件类型：`push`）
+- GitLab Push Webhook：`/gitlab_push_webhook`（事件类型：`Push Hook`）
+- 说明：用于在有人 `git push` 后自动拉取变更 diff 并进行 AI 审计（结果会进入管理面板，并可选推送通知/提交评论）。
 
 
 ## 🔧 管理面板 

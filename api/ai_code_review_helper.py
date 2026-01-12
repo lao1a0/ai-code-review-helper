@@ -1,13 +1,34 @@
 import atexit
 import logging
+import os
 import sys  # 新增导入
+from pathlib import Path
 
 import redis  # 新增导入
 from dotenv import load_dotenv  # 新增导入
-from flask import render_template
+from flask import render_template, redirect
 
-# 加载 .env 文件
-load_dotenv()
+
+def _load_env_file():
+    env_file_override = os.environ.get("ENV_FILE")
+    candidates = []
+    if env_file_override:
+        candidates.append(Path(env_file_override))
+    candidates.extend([Path.cwd() / ".env", Path(__file__).resolve().parent / ".env"])
+
+    for candidate in candidates:
+        try:
+            if candidate and candidate.is_file():
+                load_dotenv(dotenv_path=str(candidate), override=False)
+                return str(candidate)
+        except OSError:
+            continue
+    load_dotenv(override=False)
+    return None
+
+
+# 加载 .env 文件（支持根目录 .env / api/.env / ENV_FILE 指定路径）
+_load_env_file()
 
 from api.app_factory import app, executor  # 导入 executor
 from api.core_config import (SERVER_HOST, SERVER_PORT, app_configs, ADMIN_API_KEY, init_redis_client,
@@ -16,12 +37,24 @@ import api.core_config as core_config_module
 from api.services.llm_service import initialize_openai_client
 import api.services.llm_service as llm_service_module
 
+# 注册所有路由（通过 import 触发 @app.route 装饰器执行）
+# noqa: F401 - 仅用于副作用（路由注册）
+import api.routes.config_routes  # noqa: F401
+import api.routes.webhook_routes_detailed  # noqa: F401
+import api.routes.webhook_routes_general  # noqa: F401
+import api.routes.push_webhook_routes  # noqa: F401
+
 
 # --- Admin Page ---
 @app.route('/admin')
 def admin_page():
     """提供管理界面的 HTML 页面"""
     return render_template('admin.html')
+
+
+@app.route('/')
+def index():
+    return redirect('/admin')
 
 
 # --- 主程序入口 ---
@@ -129,6 +162,10 @@ if __name__ == '__main__':
     logger.info("--- Webhook 端点 ---")
     logger.info(f"GitHub Webhook URL (详细审查): http://localhost:{SERVER_PORT}/github_webhook")
     logger.info(f"GitHub Webhook URL (通用审查): http://localhost:{SERVER_PORT}/github_webhook_general")
+    logger.info(f"GitHub Webhook URL (Push 审计): http://localhost:{SERVER_PORT}/github_push_webhook")
+    logger.info(f"GitLab Webhook URL (详细审查): http://localhost:{SERVER_PORT}/gitlab_webhook")
+    logger.info(f"GitLab Webhook URL (通用审查): http://localhost:{SERVER_PORT}/gitlab_webhook_general")
+    logger.info(f"GitLab Webhook URL (Push 审计): http://localhost:{SERVER_PORT}/gitlab_push_webhook")
     logger.info("--- ---")
 
     # 注册 atexit 处理函数以关闭 ThreadPoolExecutor

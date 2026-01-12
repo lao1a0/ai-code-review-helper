@@ -1,19 +1,16 @@
+import json
+import logging
+
 from flask import request, jsonify
-import json 
-import logging 
-from api.app_factory import app
-from flask import request, jsonify
-import json 
-import logging 
-from api.app_factory import app
-from api.core_config import (
-    app_configs, github_repo_configs, gitlab_project_configs,
-    REDIS_GITHUB_CONFIGS_KEY, REDIS_GITLAB_CONFIGS_KEY,
-    get_all_reviewed_prs_mrs_keys, get_review_results, delete_review_results_for_pr_mr # 新增导入
-)
+
 import api.core_config as core_config_module  # 访问 redis_client 的推荐方式
-from api.utils import require_admin_key
+from api.app_factory import app
+from api.core_config import (app_configs, github_repo_configs, gitlab_project_configs, REDIS_GITHUB_CONFIGS_KEY,
+                             REDIS_GITLAB_CONFIGS_KEY, get_all_reviewed_prs_mrs_keys, get_review_results,
+                             delete_review_results_for_pr_mr  # 新增导入
+                             )
 from api.services.llm_service import initialize_openai_client
+from api.utils import require_admin_key
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +35,7 @@ def add_or_update_github_repo_config():
             core_config_module.redis_client.hset(REDIS_GITHUB_CONFIGS_KEY, repo_full_name, json.dumps(config_data))
             logger.info(f"GitHub 配置 {repo_full_name} 已保存到 Redis。")
         except Exception as e:
-            logger.error(f"保存 GitHub 配置 {repo_full_name} 到 Redis 时出错: {e}")
-            # 继续执行，至少内存中已更新
+            logger.error(f"保存 GitHub 配置 {repo_full_name} 到 Redis 时出错: {e}")  # 继续执行，至少内存中已更新
 
     logger.info(f"为仓库添加/更新了 GitHub 配置: {repo_full_name}")
     return jsonify({"message": f"Configuration for GitHub repository {repo_full_name} added/updated."}), 200
@@ -55,8 +51,7 @@ def delete_github_repo_config(repo_full_name):
                 core_config_module.redis_client.hdel(REDIS_GITHUB_CONFIGS_KEY, repo_full_name)
                 logger.info(f"GitHub 配置 {repo_full_name} 已从 Redis 删除。")
             except Exception as e:
-                logger.error(f"从 Redis 删除 GitHub 配置 {repo_full_name} 时出错: {e}")
-                # 继续执行，至少内存中已删除
+                logger.error(f"从 Redis 删除 GitHub 配置 {repo_full_name} 时出错: {e}")  # 继续执行，至少内存中已删除
         logger.info(f"为仓库删除了 GitHub 配置: {repo_full_name}")
         return jsonify({"message": f"Configuration for GitHub repository {repo_full_name} deleted."}), 200
     return jsonify({"error": f"Configuration for GitHub repository {repo_full_name} not found."}), 404
@@ -93,8 +88,7 @@ def add_or_update_gitlab_project_config():
             core_config_module.redis_client.hset(REDIS_GITLAB_CONFIGS_KEY, project_id_str, json.dumps(config_data))
             logger.info(f"GitLab 配置 {project_id_str} 已保存到 Redis。")
         except Exception as e:
-            logger.error(f"保存 GitLab 配置 {project_id_str} 到 Redis 时出错: {e}")
-            # 继续执行，至少内存中已更新
+            logger.error(f"保存 GitLab 配置 {project_id_str} 到 Redis 时出错: {e}")  # 继续执行，至少内存中已更新
 
     logger.info(
         f"为项目 ID 添加/更新了 GitLab 配置: {project_id_str}。实例 URL: {instance_url if instance_url else '默认'}")
@@ -112,8 +106,7 @@ def delete_gitlab_project_config(project_id):
                 core_config_module.redis_client.hdel(REDIS_GITLAB_CONFIGS_KEY, project_id_str)
                 logger.info(f"GitLab 配置 {project_id_str} 已从 Redis 删除。")
             except Exception as e:
-                logger.error(f"从 Redis 删除 GitLab 配置 {project_id_str} 时出错: {e}")
-                # 继续执行，至少内存中已删除
+                logger.error(f"从 Redis 删除 GitLab 配置 {project_id_str} 时出错: {e}")  # 继续执行，至少内存中已删除
         logger.info(f"为项目 ID 删除了 GitLab 配置: {project_id_str}")
         return jsonify({"message": f"Configuration for GitLab project {project_id_str} deleted."}), 200
     return jsonify({"error": f"Configuration for GitLab project {project_id_str} not found."}), 404
@@ -171,7 +164,7 @@ def update_global_settings():
 def list_reviewed_prs_mrs():
     """列出所有已存储 AI 审查结果的 PR/MR。"""
     reviewed_items = get_all_reviewed_prs_mrs_keys()
-    if reviewed_items is None: # 可能因为 Redis 错误返回 None
+    if reviewed_items is None:  # 可能因为 Redis 错误返回 None
         return jsonify({"error": "无法从 Redis 获取审查结果列表。"}), 500
     return jsonify({"reviewed_pr_mr_list": reviewed_items}), 200
 
@@ -186,11 +179,12 @@ def get_specific_review_results(vcs_type, identifier, pr_mr_id):
     commit_sha = request.args.get('commit_sha', None)
 
     # 允许的 vcs_type 包括详细审查和通用审查
-    allowed_vcs_types = ['github', 'gitlab', 'github_general', 'gitlab_general']
+    allowed_vcs_types = ['github', 'gitlab', 'github_general', 'gitlab_general', 'github_push', 'gitlab_push']
     if vcs_type not in allowed_vcs_types:
         return jsonify({"error": f"无效的 VCS 类型。支持的类型: {', '.join(allowed_vcs_types)}。"}), 400
 
-    logger.info(f"请求审查结果: VCS={vcs_type}, ID={identifier}, PR/MR ID={pr_mr_id}, Commit SHA={commit_sha if commit_sha else '所有'}")
+    logger.info(
+        f"请求审查结果: VCS={vcs_type}, ID={identifier}, PR/MR ID={pr_mr_id}, Commit SHA={commit_sha if commit_sha else '所有'}")
 
     results = get_review_results(vcs_type, identifier, pr_mr_id, commit_sha)
 
@@ -203,7 +197,7 @@ def get_specific_review_results(vcs_type, identifier, pr_mr_id):
     # - commit_sha not provided: returns {"commits": {...}, "project_name": "..."} or {} on error.
     # 为了简化，我们先判断 results 是否为 None，这明确表示了 get_review_results 遇到了问题或未找到特定 commit。
 
-    if results is None: # 明确表示 Redis 错误或特定 commit 未找到
+    if results is None:  # 明确表示 Redis 错误或特定 commit 未找到
         if commit_sha:
             logger.info(f"未找到 {vcs_type}/{identifier}#{pr_mr_id} 针对 commit {commit_sha} 的审查结果。")
             return jsonify({"error": f"未找到针对 commit {commit_sha} 的审查结果。"}), 404
@@ -214,36 +208,30 @@ def get_specific_review_results(vcs_type, identifier, pr_mr_id):
             logger.error(f"从 Redis 获取 {vcs_type}/{identifier}#{pr_mr_id} 的所有审查结果时出错或未找到顶级键。")
             return jsonify({"error": "从 Redis 获取审查结果时出错或未找到该 PR/MR 的记录。"}), 500
 
-
-    if commit_sha: # 请求特定 commit 的结果
+    if commit_sha:  # 请求特定 commit 的结果
         # results 在这里不为 None，意味着找到了该 commit 的数据
         return jsonify({"commit_sha": commit_sha, "review_data": results}), 200
-    else: # 请求 PR/MR 的所有 commits 的结果 (results 是一个字典，可能包含 "commits" 和 "project_name")
+    else:  # 请求 PR/MR 的所有 commits 的结果 (results 是一个字典，可能包含 "commits" 和 "project_name")
         all_commits_reviews = results.get("commits", {})
         project_name = results.get("project_name")
 
         if not all_commits_reviews and not project_name:
-             # 如果 "commits" 和 "project_name" 都不存在，且 results 不是 None (例如是 {})
-             # 这意味着 PR/MR 的 Redis key 可能存在，但里面是空的，或者 get_review_results 返回了空字典表示未找到
+            # 如果 "commits" 和 "project_name" 都不存在，且 results 不是 None (例如是 {})
+            # 这意味着 PR/MR 的 Redis key 可能存在，但里面是空的，或者 get_review_results 返回了空字典表示未找到
             logger.info(f"未找到 {vcs_type}/{identifier}#{pr_mr_id} 的任何审查结果，或结果为空。")
             # 返回空数据而不是404，因为父记录可能存在但无内容
-            response_data = {
-                "pr_mr_id": pr_mr_id,
-                "all_reviews_by_commit": {},
-                "display_identifier": identifier # 默认显示标识符
-            }
-            if vcs_type == 'gitlab' and project_name: # 即使 all_commits_reviews 为空，也可能想显示项目名
+            response_data = {"pr_mr_id": pr_mr_id, "all_reviews_by_commit": {}, "display_identifier": identifier
+                             # 默认显示标识符
+                             }
+            if vcs_type == 'gitlab' and project_name:  # 即使 all_commits_reviews 为空，也可能想显示项目名
                 response_data["project_name"] = project_name
                 response_data["display_identifier"] = project_name
             return jsonify(response_data), 200
 
-        response_data = {
-            "pr_mr_id": pr_mr_id,
-            "all_reviews_by_commit": all_commits_reviews
-        }
+        response_data = {"pr_mr_id": pr_mr_id, "all_reviews_by_commit": all_commits_reviews}
         if project_name:
             response_data["project_name"] = project_name
-        
+
         if vcs_type == 'gitlab' and project_name:
             response_data["display_identifier"] = project_name
         else:
@@ -259,7 +247,7 @@ def delete_specific_review_results_for_pr_mr(vcs_type, identifier, pr_mr_id):
     删除特定 PR/MR 的所有 AI 审查结果。
     """
     # 允许的 vcs_type 包括详细审查和通用审查
-    allowed_vcs_types = ['github', 'gitlab', 'github_general', 'gitlab_general']
+    allowed_vcs_types = ['github', 'gitlab', 'github_general', 'gitlab_general', 'github_push', 'gitlab_push']
     if vcs_type not in allowed_vcs_types:
         return jsonify({"error": f"无效的 VCS 类型。支持的类型: {', '.join(allowed_vcs_types)}。"}), 400
 

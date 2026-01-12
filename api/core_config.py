@@ -1,32 +1,65 @@
-import os
 import json
-import redis
 import logging
+import os
+from pathlib import Path
+from typing import Optional
+
+import redis
 from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
 
 
+def _resolve_env_file_path() -> Optional[str]:
+    """
+    Resolve .env location for reading config values.
+
+    Priority:
+    1) ENV_FILE (explicit path)
+    2) CWD/.env
+    3) api/.env (next to this file)
+    """
+    env_file_override = os.environ.get("ENV_FILE")
+    candidates: list[Path] = []
+    if env_file_override:
+        candidates.append(Path(env_file_override))
+    candidates.extend([Path.cwd() / ".env", Path(__file__).resolve().parent / ".env"])
+
+    for candidate in candidates:
+        try:
+            if candidate and candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def load_app_configs_from_env():
     """从 .env 文件加载应用配置"""
-    env_values = dotenv_values('.env')
-    return {
-        "OPENAI_API_BASE_URL": env_values.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
+    env_path = _resolve_env_file_path()
+    if not env_path:
+        logger.warning("未找到 .env 文件（可通过 ENV_FILE 指定），将使用默认配置。")
+        env_values = {}
+    else:
+        env_values = dotenv_values(env_path)
+    return {"OPENAI_API_BASE_URL": env_values.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
         "OPENAI_API_KEY": env_values.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
         "OPENAI_MODEL": env_values.get("OPENAI_MODEL", "gpt-4o"),
         "GITHUB_API_URL": env_values.get("GITHUB_API_URL", "https://api.github.com"),
         "GITHUB_ACCESS_TOKEN": env_values.get("GITHUB_ACCESS_TOKEN", ""),
         "GITLAB_API_URL": env_values.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
         "GITLAB_INSTANCE_URL": env_values.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
-        "WECOM_BOT_WEBHOOK_URL": env_values.get("WECOM_BOT_WEBHOOK_URL", ""),
-        # Redis 配置 (新增)
-        "REDIS_HOST": env_values.get("REDIS_HOST"),
-        "REDIS_PORT": int(env_values.get("REDIS_PORT", "6379")),
+        "WECOM_BOT_WEBHOOK_URL": env_values.get("WECOM_BOT_WEBHOOK_URL", ""), # Redis 配置 (新增)
+        "REDIS_HOST": env_values.get("REDIS_HOST"), "REDIS_PORT": int(env_values.get("REDIS_PORT", "6379")),
         "REDIS_PASSWORD": env_values.get("REDIS_PASSWORD"),
         "REDIS_SSL_ENABLED": env_values.get("REDIS_SSL_ENABLED", "true").lower() == "true",
         "REDIS_DB": int(env_values.get("REDIS_DB", "0")),
-        "CUSTOM_WEBHOOK_URL": env_values.get("CUSTOM_WEBHOOK_URL", ""), # 新增：自定义通知 Webhook URL
-    }
+        "CUSTOM_WEBHOOK_URL": env_values.get("CUSTOM_WEBHOOK_URL", ""),  # 新增：自定义通知 Webhook URL
+
+        # Push 审计（Git push webhook）配置
+        "PUSH_AUDIT_ENABLED": env_values.get("PUSH_AUDIT_ENABLED", "true").lower() == "true",
+        "PUSH_AUDIT_MAX_FILES": int(env_values.get("PUSH_AUDIT_MAX_FILES", "20")),
+        "PUSH_AUDIT_POST_COMMIT_COMMENT": env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT", "true").lower() == "true", }
 
 
 # --- 全局配置 ---
@@ -61,32 +94,28 @@ def init_redis_client():
 
     try:
         logger.info(f"尝试连接到 Redis: {redis_host}:{app_configs.get('REDIS_PORT')}")
-        redis_client = redis.Redis(
-            host=redis_host,
-            port=app_configs.get("REDIS_PORT"),
-            password=app_configs.get("REDIS_PASSWORD"),
-            ssl=app_configs.get("REDIS_SSL_ENABLED"),
-            db=app_configs.get("REDIS_DB"),
-            socket_connect_timeout=5  # 5 seconds timeout
+        redis_client = redis.Redis(host=redis_host, port=app_configs.get("REDIS_PORT"),
+            password=app_configs.get("REDIS_PASSWORD"), ssl=app_configs.get("REDIS_SSL_ENABLED"),
+            db=app_configs.get("REDIS_DB"), socket_connect_timeout=5  # 5 seconds timeout
         )
         redis_client.ping()  # 验证连接
         logger.info("成功连接到 Redis。")
     except redis.exceptions.ConnectionError as e:
         err_msg = f"连接 Redis 失败: {e}。请检查 Redis 配置和可用性。服务无法启动。"
         logger.critical(err_msg)
-        redis_client = None # 确保客户端状态为 None
-        raise redis.exceptions.ConnectionError(err_msg) # 重新引发，以便主程序捕获
+        redis_client = None  # 确保客户端状态为 None
+        raise redis.exceptions.ConnectionError(err_msg)  # 重新引发，以便主程序捕获
     except Exception as e:
         err_msg = f"Redis 初始化期间发生意外错误: {e}。服务无法启动。"
         logger.critical(err_msg)
-        redis_client = None # 确保客户端状态为 None
-        raise ValueError(err_msg) # 引发通用错误
+        redis_client = None  # 确保客户端状态为 None
+        raise ValueError(err_msg)  # 引发通用错误
 
 
 def load_configs_from_redis():
     """如果 Redis 可用，则从 Redis 加载配置到内存中。"""
     global github_repo_configs, gitlab_project_configs
-    global github_repo_configs, gitlab_project_configs # 确保修改的是全局变量
+    global github_repo_configs, gitlab_project_configs  # 确保修改的是全局变量
     if redis_client:
         try:
             # 加载 GitHub 配置
@@ -198,15 +227,12 @@ def remove_processed_commit_entries_for_pr_mr(vcs_type: str, identifier: str, pr
             logger.info(
                 f"为 {vcs_type} {identifier} #{pr_mr_id} 从 Redis 中总共移除了 {total_removed_count} 个已处理的 commit 条目。")
         else:
-            logger.info(
-                f"在 Redis 中未找到与 {vcs_type} {identifier} #{pr_mr_id} 相关的已处理 commit 条目。")
+            logger.info(f"在 Redis 中未找到与 {vcs_type} {identifier} #{pr_mr_id} 相关的已处理 commit 条目。")
 
     except redis.exceptions.RedisError as e:
-        logger.error(
-            f"为 {vcs_type} {identifier} #{pr_mr_id} 移除已处理的 commit 条目时 Redis 出错: {e}")
+        logger.error(f"为 {vcs_type} {identifier} #{pr_mr_id} 移除已处理的 commit 条目时 Redis 出错: {e}")
     except Exception as e:
-        logger.error(
-            f"为 {vcs_type} {identifier} #{pr_mr_id} 移除已处理的 commit 条目时发生意外错误: {e}")
+        logger.error(f"为 {vcs_type} {identifier} #{pr_mr_id} 移除已处理的 commit 条目时发生意外错误: {e}")
 
     # 同时删除关联的审查结果
     delete_review_results_for_pr_mr(vcs_type, identifier, pr_mr_id)
@@ -217,7 +243,8 @@ def _get_review_results_redis_key(vcs_type: str, identifier: str, pr_mr_id: str)
     return f"{REDIS_REVIEW_RESULTS_KEY_PREFIX}{vcs_type}:{identifier}:{str(pr_mr_id)}"
 
 
-def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name: str = None):
+def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str,
+                        project_name: str = None):
     """将 AI 审查结果保存到 Redis。"""
     # global redis_client # redis_client is already global
     if not redis_client:
@@ -232,15 +259,15 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
         # 使用 pipeline 保证原子性
         pipe = redis_client.pipeline()
         pipe.hset(redis_key, commit_sha, review_json_string)
-        if vcs_type.startswith('gitlab') and project_name: # 确保 'gitlab' 和 'gitlab_general' 都能保存项目名
+        if vcs_type.startswith('gitlab') and project_name:  # 确保 'gitlab' 和 'gitlab_general' 都能保存项目名
             # 仅在首次或需要更新时设置项目名称
             # 如果 _project_name 已存在且不同，可以选择是否覆盖，这里简单覆盖
             pipe.hset(redis_key, "_project_name", project_name)
-        
+
         # 为审查结果设置过期时间，例如7天，以避免无限增长
-        pipe.expire(redis_key, 60 * 60 * 24 * 7) # 7 days
+        pipe.expire(redis_key, 60 * 60 * 24 * 7)  # 7 days
         pipe.execute()
-        
+
         log_msg = f"成功将 {vcs_type} {identifier} #{pr_mr_id} (commit: {commit_sha}) 的审查结果保存到 Redis。"
         if vcs_type == 'gitlab' and project_name:
             log_msg += f" 项目名称: {project_name}。"
@@ -263,7 +290,7 @@ def get_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha
             if result_bytes:
                 return json.loads(result_bytes.decode('utf-8'))
             return None
-        else: # 获取 PR/MR 的所有 commits 的审查结果
+        else:  # 获取 PR/MR 的所有 commits 的审查结果
             all_results_bytes = redis_client.hgetall(redis_key)
             decoded_results = {}
             project_name_for_pr_mr = None
@@ -272,11 +299,11 @@ def get_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha
                 try:
                     if field_str == "_project_name":
                         project_name_for_pr_mr = value_bytes.decode('utf-8')
-                    else: # 这是一个 commit sha
+                    else:  # 这是一个 commit sha
                         decoded_results[field_str] = json.loads(value_bytes.decode('utf-8'))
                 except (UnicodeDecodeError, json.JSONDecodeError) as e:
                     logger.error(f"解码/解析 Redis 中的审查结果时出错 (Key: {redis_key}, Field: {field_str}): {e}")
-            
+
             # 将项目名称（如果存在）添加到返回结果中，但不作为 commit 结果的一部分
             # API 端点将决定如何使用它
             final_result = {"commits": decoded_results}
@@ -297,15 +324,16 @@ def get_all_reviewed_prs_mrs_keys():
     if not redis_client:
         logger.warning("Redis 客户端不可用，无法获取已审查的 PR/MR 列表。")
         return []
-    
+
     keys = []
     try:
         # 使用 SCAN 迭代匹配的 key，以避免阻塞
         cursor = '0'
         while cursor != 0:
-            cursor, current_keys = redis_client.scan(cursor=cursor, match=f"{REDIS_REVIEW_RESULTS_KEY_PREFIX}*", count=100)
+            cursor, current_keys = redis_client.scan(cursor=cursor, match=f"{REDIS_REVIEW_RESULTS_KEY_PREFIX}*",
+                                                     count=100)
             keys.extend([key.decode('utf-8') for key in current_keys])
-        
+
         # 从 Key 中提取可读的 PR/MR 标识符
         # 例如: "ai_code_review_helper:review_results:github:owner/repo:123" -> "github:owner/repo:123"
         # 或者可以返回更结构化的信息
@@ -314,8 +342,8 @@ def get_all_reviewed_prs_mrs_keys():
             try:
                 # "ai_code_review_helper:review_results:github:owner/repo:123"
                 parts = key.split(':')
-                if len(parts) >= 4: # prefix, vcs_type, identifier, pr_mr_id (identifier can contain ':')
-                    vcs_type_full = parts[2] # e.g., "github", "gitlab", "github_general", "gitlab_general"
+                if len(parts) >= 4:  # prefix, vcs_type, identifier, pr_mr_id (identifier can contain ':')
+                    vcs_type_full = parts[2]  # e.g., "github", "gitlab", "github_general", "gitlab_general"
                     pr_mr_id = parts[-1]
                     identifier_parts = parts[3:-1]
                     identifier_str = ":".join(identifier_parts)
@@ -329,30 +357,32 @@ def get_all_reviewed_prs_mrs_keys():
                             project_name_bytes = redis_client.hget(key, "_project_name")
                             if project_name_bytes:
                                 display_identifier = project_name_bytes.decode('utf-8')
-                                logger.debug(f"找到 GitLab 项目名称 '{display_identifier}' 用于 Key '{key}' (VCS Type: {vcs_type_full})")
+                                logger.debug(
+                                    f"找到 GitLab 项目名称 '{display_identifier}' 用于 Key '{key}' (VCS Type: {vcs_type_full})")
                             else:
-                                logger.debug(f"未在 Key '{key}' 中找到 GitLab 项目名称 (VCS Type: {vcs_type_full})，将使用 ID '{identifier_str}'。")
+                                logger.debug(
+                                    f"未在 Key '{key}' 中找到 GitLab 项目名称 (VCS Type: {vcs_type_full})，将使用 ID '{identifier_str}'。")
                         except Exception as e_proj_name:
-                            logger.error(f"从 Redis Key '{key}' (VCS Type: {vcs_type_full}) 获取项目名称时出错: {e_proj_name}")
-                    
+                            logger.error(
+                                f"从 Redis Key '{key}' (VCS Type: {vcs_type_full}) 获取项目名称时出错: {e_proj_name}")
+
                     # 规范化显示名称中的类型
                     if vcs_type_full == "github_general":
                         display_vcs_type_prefix = "GITHUB (General)"
                     elif vcs_type_full == "gitlab_general":
                         display_vcs_type_prefix = "GITLAB (General)"
                     elif vcs_type_full == "github":
-                         display_vcs_type_prefix = "GITHUB (Detailed)"
+                        display_vcs_type_prefix = "GITHUB (Detailed)"
                     elif vcs_type_full == "gitlab":
-                         display_vcs_type_prefix = "GITLAB (Detailed)"
+                        display_vcs_type_prefix = "GITLAB (Detailed)"
+                    elif vcs_type_full == "github_push":
+                        display_vcs_type_prefix = "GITHUB (Push Audit)"
+                    elif vcs_type_full == "gitlab_push":
+                        display_vcs_type_prefix = "GITLAB (Push Audit)"
 
-
-                    identifiers.append({
-                        "key": key, 
-                        "vcs_type": vcs_type_full, # 存储原始的 vcs_type，例如 github_general
-                        "identifier": identifier_str, 
-                        "pr_mr_id": pr_mr_id,
-                        "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}"
-                    })
+                    identifiers.append({"key": key, "vcs_type": vcs_type_full,  # 存储原始的 vcs_type，例如 github_general
+                        "identifier": identifier_str, "pr_mr_id": pr_mr_id,
+                        "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}"})
             except Exception as e:
                 logger.error(f"解析审查结果 Redis Key '{key}' 时出错: {e}")
         return identifiers
@@ -374,7 +404,8 @@ def delete_review_results_for_pr_mr(vcs_type: str, identifier: str, pr_mr_id: st
         if deleted_count > 0:
             logger.info(f"成功从 Redis 删除 {vcs_type} {identifier} #{pr_mr_id} 的 AI 审查结果 (Key: {redis_key})。")
         else:
-            logger.info(f"在 Redis 中未找到 {vcs_type} {identifier} #{pr_mr_id} 的 AI 审查结果以供删除 (Key: {redis_key})。")
+            logger.info(
+                f"在 Redis 中未找到 {vcs_type} {identifier} #{pr_mr_id} 的 AI 审查结果以供删除 (Key: {redis_key})。")
     except redis.exceptions.RedisError as e:
         logger.error(f"从 Redis 删除 AI 审查结果时出错 (Key: {redis_key}): {e}")
 
@@ -386,5 +417,4 @@ github_repo_configs = {}
 
 # GitLab 项目配置
 # key: project_id (string), value: {"secret": "webhook_secret", "token": "gitlab_access_token", "instance_url": "custom_instance_url"}
-gitlab_project_configs = {}
-# --- ---
+gitlab_project_configs = {}  # --- ---

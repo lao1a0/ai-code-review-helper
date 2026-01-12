@@ -25,7 +25,8 @@
 
         <!-- API Key Settings Section -->
         <div id="apiKeySettingsSection" class="content-section">
-            <div class="config-section api-key-section"> <!-- Re-using api-key-section for styling if desired, or new styles -->
+            <div class="config-section api-key-section">
+                <!-- Re-using api-key-section for styling if desired, or new styles -->
                 <h2>Admin API 密钥设置</h2>
                 <label for="adminApiKey">Admin API Key:</label>
                 <input type="password" id="adminApiKey" placeholder="请输入您的 Admin API Key">
@@ -84,10 +85,13 @@
                 <h2>LLM 配置</h2>
                 <form id="llmConfigForm">
                     <label for="openaiApiBaseUrl">OpenAI API Base URL:</label>
-                    <input type="text" id="openaiApiBaseUrl" name="OPENAI_API_BASE_URL" placeholder="例如：https://api.openai.com/v1">
+                    <input type="text" id="openaiApiBaseUrl" name="OPENAI_API_BASE_URL"
+                           placeholder="例如：https://api.openai.com/v1">
 
                     <label for="openaiApiKey">OpenAI API Key:</label>
-                    <input type="password" id="openaiApiKey" name="OPENAI_API_KEY" placeholder="请输入您的 OpenAI API Key">
+                    <input type="password" id="openaiApiKey" name="OPENAI_API_KEY"
+                           placeholder="请输入您的 OpenAI API Key">
+                    <p id="openaiApiKeyStatus" style="font-size:0.9em; color: #555;"></p>
 
                     <label for="openaiModel">OpenAI Model:</label>
                     <input type="text" id="openaiModel" name="OPENAI_MODEL" placeholder="例如：gpt-4o">
@@ -103,12 +107,16 @@
                 <h2>通知配置</h2>
                 <form id="notificationConfigForm">
                     <label for="wecomBotWebhookUrl">企业微信机器人 Webhook URL:</label>
-                    <input type="text" id="wecomBotWebhookUrl" name="WECOM_BOT_WEBHOOK_URL" placeholder="请输入企业微信机器人的 Webhook URL">
-                    <p style="font-size:0.85em; color: #555; margin-top: -10px; margin-bottom: 15px;">如果为空，则禁用企业微信通知。</p>
+                    <input type="text" id="wecomBotWebhookUrl" name="WECOM_BOT_WEBHOOK_URL"
+                           placeholder="请输入企业微信机器人的 Webhook URL">
+                    <p style="font-size:0.85em; color: #555; margin-top: -10px; margin-bottom: 15px;">
+                        如果为空，则禁用企业微信通知。</p>
 
                     <label for="customWebhookUrl">自定义 Webhook URL:</label>
-                    <input type="text" id="customWebhookUrl" name="CUSTOM_WEBHOOK_URL" placeholder="请输入自定义通知的 Webhook URL">
-                    <p style="font-size:0.85em; color: #555; margin-top: -10px; margin-bottom: 15px;">如果为空，则禁用自定义 Webhook 通知。将发送包含 'content' 字段的 JSON POST 请求。</p>
+                    <input type="text" id="customWebhookUrl" name="CUSTOM_WEBHOOK_URL"
+                           placeholder="请输入自定义通知的 Webhook URL">
+                    <p style="font-size:0.85em; color: #555; margin-top: -10px; margin-bottom: 15px;">如果为空，则禁用自定义
+                        Webhook 通知。将发送包含 'content' 字段的 JSON POST 请求。</p>
 
                     <button type="submit">保存通知配置</button>
                 </form>
@@ -159,13 +167,13 @@
             date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
             expires = "; expires=" + date.toUTCString();
         }
-        document.cookie = name + "=" + (value || "")  + expires + "; path=/; SameSite=Lax";
+        document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax";
     }
 
     function getCookie(name) {
         const nameEQ = name + "=";
         const ca = document.cookie.split(';');
-        for(let i = 0; i < ca.length; i++) {
+        for (let i = 0; i < ca.length; i++) {
             let c = ca[i];
             while (c.charAt(0) === ' ') c = c.substring(1, c.length);
             if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
@@ -241,6 +249,7 @@
         e.preventDefault();
         showSection('aiReviewResults');
     });
+
     // navSettings event listener removed
 
 
@@ -440,6 +449,7 @@
             document.getElementById('openaiApiKey').value = '';
             document.getElementById('openaiModel').value = '';
             document.getElementById('wecomBotWebhookUrl').value = '';
+            document.getElementById('openaiApiKeyStatus').textContent = '';
             console.log("Admin API Key not available, skipping load of global settings.");
             return;
         }
@@ -447,6 +457,7 @@
         if (data) {
             document.getElementById('openaiApiBaseUrl').value = data.OPENAI_API_BASE_URL || '';
             // document.getElementById('openaiApiKey').value = data.OPENAI_API_KEY || ''; // 不重新填充密码字段
+            document.getElementById('openaiApiKeyStatus').textContent = data.OPENAI_API_KEY ? 'OpenAI API Key: 已设置' : 'OpenAI API Key: 未设置';
             document.getElementById('openaiModel').value = data.OPENAI_MODEL || '';
             document.getElementById('wecomBotWebhookUrl').value = data.WECOM_BOT_WEBHOOK_URL || '';
             document.getElementById('customWebhookUrl').value = data.CUSTOM_WEBHOOK_URL || ''; // 新增
@@ -458,6 +469,7 @@
             document.getElementById('openaiModel').value = '';
             document.getElementById('wecomBotWebhookUrl').value = '';
             document.getElementById('customWebhookUrl').value = ''; // 新增
+            document.getElementById('openaiApiKeyStatus').textContent = '';
             showStatus('加载全局配置失败。', true);
         }
     }
@@ -477,9 +489,9 @@
             }
         }
         if (Object.keys(payload).length === 0 && !settings.OPENAI_API_KEY) { // OPENAI_API_KEY can be intentionally cleared
-             // If all fields are empty, and API key is also empty, maybe don't send.
-             // However, user might want to clear a key. The backend should handle empty strings if they mean "unset".
-             // For now, we send what's in the form. If a field is empty, it's sent as empty.
+            // If all fields are empty, and API key is also empty, maybe don't send.
+            // However, user might want to clear a key. The backend should handle empty strings if they mean "unset".
+            // For now, we send what's in the form. If a field is empty, it's sent as empty.
         }
 
 
@@ -550,8 +562,8 @@
             setCookie('ADMIN_API_KEY', newApiKey.trim(), 7); // Save/Update cookie for 7 days
             apiKeyStatus.textContent = 'Admin API Key 已更新。';
             // Reload lists with the new key
-            githubRepoList.innerHTML = ''; 
-            gitlabProjectList.innerHTML = ''; 
+            githubRepoList.innerHTML = '';
+            gitlabProjectList.innerHTML = '';
             console.log("API Key changed by user. Attempting to reload configs.");
             await loadGithubRepos();
             await loadGitlabProjects();
@@ -666,7 +678,7 @@
                 const commitDiv = document.createElement('div');
                 commitDiv.className = 'commit-details';
                 commitDiv.innerHTML = `<h4>Commit: ${commitSha.substring(0, 12)}...</h4>`;
-                
+
                 let reviewsArray = [];
                 try {
                     // reviewDataJson is already an object/array from the backend if parsed correctly there
@@ -733,9 +745,9 @@
             // fetchData should have shown an error status if result is null or not success
             // If result exists but not success, it might have an error message from backend
             if (result && result.error) {
-                 showStatus(`删除失败: ${result.error}`, true);
+                showStatus(`删除失败: ${result.error}`, true);
             } else if (!result) { // fetchData returned null (e.g. network error, or API key issue before request)
-                 // showStatus('删除审查记录失败。请检查网络或API Key。', true); // fetchData already shows this
+                // showStatus('删除审查记录失败。请检查网络或API Key。', true); // fetchData already shows this
             }
         }
     }
