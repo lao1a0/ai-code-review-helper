@@ -93,7 +93,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
                 # 确保 review_item 中包含 old_path (如果适用)
                 if "old_path" not in review_item and file_data.get("old_path"):
                     review_item["old_path"] = file_data["old_path"]
-                
+
                 success = add_github_pr_comment(owner, repo_name, pull_number, access_token, review_item, head_sha)
                 if success:
                     file_comments_added += 1

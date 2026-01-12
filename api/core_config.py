@@ -2,8 +2,32 @@ import os
 import json
 import redis
 import logging
+from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
+
+
+def load_app_configs_from_env():
+    """从 .env 文件加载应用配置"""
+    env_values = dotenv_values('.env')
+    return {
+        "OPENAI_API_BASE_URL": env_values.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
+        "OPENAI_API_KEY": env_values.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
+        "OPENAI_MODEL": env_values.get("OPENAI_MODEL", "gpt-4o"),
+        "GITHUB_API_URL": env_values.get("GITHUB_API_URL", "https://api.github.com"),
+        "GITHUB_ACCESS_TOKEN": env_values.get("GITHUB_ACCESS_TOKEN", ""),
+        "GITLAB_API_URL": env_values.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
+        "GITLAB_INSTANCE_URL": env_values.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
+        "WECOM_BOT_WEBHOOK_URL": env_values.get("WECOM_BOT_WEBHOOK_URL", ""),
+        # Redis 配置 (新增)
+        "REDIS_HOST": env_values.get("REDIS_HOST"),
+        "REDIS_PORT": int(env_values.get("REDIS_PORT", "6379")),
+        "REDIS_PASSWORD": env_values.get("REDIS_PASSWORD"),
+        "REDIS_SSL_ENABLED": env_values.get("REDIS_SSL_ENABLED", "true").lower() == "true",
+        "REDIS_DB": int(env_values.get("REDIS_DB", "0")),
+        "CUSTOM_WEBHOOK_URL": env_values.get("CUSTOM_WEBHOOK_URL", ""), # 新增：自定义通知 Webhook URL
+    }
+
 
 # --- 全局配置 ---
 # 服务器配置
@@ -13,24 +37,8 @@ SERVER_PORT = int(os.environ.get("SERVER_PORT", "8088"))  # 应用端口 (统一
 # 配置管理 API Key (用于保护配置接口)
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "change_this_unified_secret_key")  # 强烈建议修改此默认值
 
-# --- 应用可配置项 (内存字典，初始值从环境变量加载，可被 API 修改) ---
-app_configs = {
-    "OPENAI_API_BASE_URL": os.environ.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
-    "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
-    "OPENAI_MODEL": os.environ.get("OPENAI_MODEL", "gpt-4o"),
-    "GITHUB_API_URL": os.environ.get("GITHUB_API_URL", "https://api.github.com"),
-    "GITHUB_ACCESS_TOKEN": os.environ.get("GITHUB_ACCESS_TOKEN", ""),
-    "GITLAB_API_URL": os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
-    "GITLAB_INSTANCE_URL": os.environ.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
-    "WECOM_BOT_WEBHOOK_URL": os.environ.get("WECOM_BOT_WEBHOOK_URL", ""),
-    # Redis 配置 (新增)
-    "REDIS_HOST": os.environ.get("REDIS_HOST", None),
-    "REDIS_PORT": int(os.environ.get("REDIS_PORT", "6379")),
-    "REDIS_PASSWORD": os.environ.get("REDIS_PASSWORD", None),
-    "REDIS_SSL_ENABLED": os.environ.get("REDIS_SSL_ENABLED", "true").lower() == "true",
-    "REDIS_DB": int(os.environ.get("REDIS_DB", "0")),
-    "CUSTOM_WEBHOOK_URL": os.environ.get("CUSTOM_WEBHOOK_URL", ""), # 新增：自定义通知 Webhook URL
-}
+# --- 应用可配置项 (内存字典，从 .env 文件加载，可被 API 修改) ---
+app_configs = load_app_configs_from_env()
 # --- ---
 
 # --- Redis 客户端实例 ---
