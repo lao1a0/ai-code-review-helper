@@ -2,3 +2,5 @@
 .aider*
 .idea/
 .env
+__pycache__/
+_ref_cyberstrikeai/

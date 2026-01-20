@@ -134,8 +134,20 @@ def update_global_settings():
     openai_config_changed = False
     for key in app_configs.keys():  # Only update keys that are defined in app_configs
         if key in data:
-            if app_configs[key] != data[key]:  # Check if value actually changed
-                app_configs[key] = data[key]
+            incoming_value = data[key]
+
+            # Keep a few typed fields stable when updated from the console UI.
+            try:
+                if key in ["LLM_TEMPERATURE"]:
+                    incoming_value = float(incoming_value)
+                elif key in ["LLM_MAX_CONTEXT_TOKENS"]:
+                    incoming_value = int(incoming_value)
+            except Exception:
+                # Fall back to raw value.
+                pass
+
+            if app_configs[key] != incoming_value:  # Check if value actually changed
+                app_configs[key] = incoming_value
                 updated_keys.append(key)
                 if key in ["OPENAI_API_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"]:
                     openai_config_changed = True

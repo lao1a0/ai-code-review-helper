@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Review Helper - Console</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/console.css') }}">
+</head>
+<body>
+<div class="console-shell">
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">AI</div>
+            <div>
+                <div class="title">AI Code Review Helper</div>
+                <div class="subtitle">RAG + Skill 管理控制台（参考 CyberStrikeAI 风格）</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="btn" id="btnSetKey" type="button">设置 Admin Key</button>
+            <a class="link" href="/chat" target="_blank">对话主页</a>
+            <a class="link" href="/admin" target="_blank">旧版管理</a>
+            <a class="link" href="/review_results" target="_blank">旧版记录</a>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="nav">
+                <button class="nav-item active" data-page="dashboard" type="button">Dashboard</button>
+                <button class="nav-item" data-page="reviews" type="button">审查记录</button>
+                <button class="nav-item" data-page="projects" type="button">项目管理</button>
+                <button class="nav-item" data-page="members" type="button">成员分析</button>
+                <button class="nav-item" data-page="llm" type="button">大模型管理</button>
+                <button class="nav-item" data-page="notify" type="button">通知机器人</button>
+                <button class="nav-item" data-page="logs" type="button">系统日志</button>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div id="globalStatus" class="status" hidden></div>
+
+            <!-- Dashboard -->
+            <section class="page active" data-page="dashboard">
+                <div class="page-header">
+                    <h2>Agent 配置与对话</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadDashboard" type="button">刷新</button>
+                    </div>
+                </div>
+
+                <div class="grid two">
+                    <div class="card">
+                        <div class="card-title">对话（用于配置仓库/项目）</div>
+                        <div class="chat-box" id="agentChatMessages"></div>
+                        <div class="chat-input-row">
+                            <textarea id="agentChatInput" class="textarea" rows="2" placeholder="例如：列出 GitHub 仓库 / 添加 GitLab project_id=123 secret=... token=..."></textarea>
+                            <button class="btn primary" id="btnAgentChatSend" type="button">发送</button>
+                        </div>
+                        <div class="hint">对话接口：<code>/api/agent/chat</code>（需要 Admin Key）</div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">RAG 接入点（按需检索）</div>
+                        <div class="form-grid">
+                            <label class="check"><input type="checkbox" id="ragEnabled"> 启用 RAG</label>
+                            <label class="check"><input type="checkbox" id="ragSourceCode" checked> 代码上下文</label>
+                            <label class="check"><input type="checkbox" id="ragSourceDocs"> 项目文档</label>
+                            <label class="check"><input type="checkbox" id="ragSourceDeps"> 依赖库文档</label>
+                        </div>
+                        <hr class="sep">
+                        <div class="card-title small">函数调用链补全</div>
+                        <div class="form-grid three">
+                            <label class="check"><input type="checkbox" id="callChainEnabled"> 启用</label>
+                            <label>最大深度 <input type="number" id="callChainDepth" class="input" min="1" max="10" value="3"></label>
+                            <label class="check"><input type="checkbox" id="callChainCrossFile"> 跨文件</label>
+                        </div>
+                        <div class="form-grid">
+                            <label>语言解析器
+                                <select id="callChainParser" class="select">
+                                    <option value="python">Python</option>
+                                    <option value="java">Java</option>
+                                    <option value="go">Go</option>
+                                    <option value="js">JS/TS</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" id="btnSaveAgentSettings" type="button">保存 Agent 设置</button>
+                        </div>
+                        <div class="hint">设置存储：<code>/api/agent/settings</code>（需要 Admin Key）</div>
+                    </div>
+                </div>
+
+                <div class="grid two">
+                    <div class="card">
+                        <div class="card-title">Skill 管理（名称注入 + 按需读取）</div>
+                        <div class="form-grid">
+                            <label>启用的 Skills（仅注入名称）
+                                <div id="skillPicker" class="skill-picker"></div>
+                            </label>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" id="btnSkillsRefresh" type="button">list skills</button>
+                            <button class="btn" id="btnSkillRead" type="button">read selected skill</button>
+                        </div>
+                        <div class="hint">Skill 文档目录：<code>./skills/*/SKILL.md</code></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">提示词模板（避免上下文污染）</div>
+                        <div class="form-grid">
+                            <label>模板
+                                <select id="promptTemplate" class="select"></select>
+                            </label>
+                            <label class="check"><input type="checkbox" id="promptInjectSkillNames" checked> 注入启用技能名称</label>
+                            <label class="check"><input type="checkbox" id="promptOnDemandSkillRead" checked> 技能文档按需读取</label>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" id="btnPromptsRefresh" type="button">刷新模板列表</button>
+                        </div>
+                        <div class="hint">模板列表：<code>/api/prompts</code>（需要 Admin Key）</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reviews -->
+            <section class="page" data-page="reviews">
+                <div class="page-header">
+                    <h2>审查记录</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadReviews" type="button">刷新</button>
+                    </div>
+                </div>
+                <div class="filters">
+                    <input id="reviewSearch" class="input" placeholder="搜索：项目/成员/PR/MR/文件">
+                    <select id="filterRisk" class="select">
+                        <option value="">风险等级（全部）</option>
+                        <option value="CRITICAL">CRITICAL</option>
+                        <option value="HIGH">HIGH</option>
+                        <option value="MEDIUM">MEDIUM</option>
+                        <option value="LOW">LOW</option>
+                        <option value="UNKNOWN">UNKNOWN</option>
+                    </select>
+                    <select id="filterSkill" class="select">
+                        <option value="">技能命中（全部）</option>
+                    </select>
+                    <select id="filterRag" class="select">
+                        <option value="">RAG 来源（全部）</option>
+                        <option value="code_context">代码上下文</option>
+                        <option value="project_docs">项目文档</option>
+                        <option value="dependency_docs">依赖文档</option>
+                    </select>
+                </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table" id="reviewsTable">
+                            <thead>
+                            <tr>
+                                <th>PR/MR</th>
+                                <th>项目</th>
+                                <th>风险</th>
+                                <th>文件</th>
+                                <th>技能命中</th>
+                                <th>RAG 来源</th>
+                                <th>时间</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="hint">数据：<code>/api/reviews/list</code> + <code>/api/reviews/*</code>（需要 Admin Key）</div>
+            </section>
+
+            <!-- Projects -->
+            <section class="page" data-page="projects">
+                <div class="page-header">
+                    <h2>项目管理</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadProjects" type="button">刷新</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table" id="projectsTable">
+                            <thead>
+                            <tr>
+                                <th>平台</th>
+                                <th>标识</th>
+                                <th>RAG</th>
+                                <th>Skills</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="hint">项目来源：GitHub/GitLab 配置（旧版管理）+ 项目设置（本控制台）</div>
+            </section>
+
+            <!-- Members -->
+            <section class="page" data-page="members">
+                <div class="page-header">
+                    <h2>成员分析</h2>
+                </div>
+                <div class="card">
+                    <div class="empty">
+                        当前版本未接入成员数据（需要从 GitHub/GitLab API 获取 PR/MR 作者、审查参与度等）。
+                        这里预留“技能画像 / 风险行为 / RAG 贡献”面板位点。
+                    </div>
+                </div>
+            </section>
+
+            <!-- LLM -->
+            <section class="page" data-page="llm">
+                <div class="page-header">
+                    <h2>大模型管理</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadLlm" type="button">刷新</button>
+                        <button class="btn primary" id="btnSaveLlm" type="button">保存</button>
+                    </div>
+                </div>
+                <div class="grid two">
+                    <div class="card">
+                        <div class="card-title">模型参数与策略</div>
+                        <div class="form-grid">
+                            <label>OPENAI_API_BASE_URL <input id="cfgOpenaiBaseUrl" class="input" placeholder="https://api.openai.com/v1"></label>
+                            <label>OPENAI_MODEL <input id="cfgOpenaiModel" class="input" placeholder="gpt-4o"></label>
+                            <label>LLM_TEMPERATURE <input id="cfgTemp" class="input" placeholder="0.2"></label>
+                            <label>LLM_MAX_CONTEXT_TOKENS <input id="cfgMaxCtx" class="input" placeholder="8000"></label>
+                        </div>
+                        <div class="form-grid">
+                            <label>TOOL_CALL_POLICY
+                                <select id="cfgToolPolicy" class="select">
+                                    <option value="auto">auto</option>
+                                    <option value="never">never</option>
+                                    <option value="manual">manual</option>
+                                </select>
+                            </label>
+                            <label>RAG_TRIGGER_POLICY
+                                <select id="cfgRagPolicy" class="select">
+                                    <option value="on_demand">on_demand</option>
+                                    <option value="auto">auto</option>
+                                    <option value="never">never</option>
+                                </select>
+                            </label>
+                            <label>SKILL_READ_POLICY
+                                <select id="cfgSkillPolicy" class="select">
+                                    <option value="on_demand">on_demand</option>
+                                    <option value="always">always</option>
+                                    <option value="never">never</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="hint">配置接口：<code>/config/global_settings</code>（需要 Admin Key）</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">路由与评估（位点）</div>
+                        <div class="empty">
+                            预留：按项目/语言/风险类型路由模型版本、记录策略快照、A/B 对比（仅技能 / 仅 RAG / RAG+技能）。
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Notify -->
+            <section class="page" data-page="notify">
+                <div class="page-header">
+                    <h2>通知机器人</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadNotify" type="button">刷新</button>
+                        <button class="btn primary" id="btnSaveNotify" type="button">保存</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="form-grid">
+                        <label>WECOM_BOT_WEBHOOK_URL <input id="cfgWecomUrl" class="input" placeholder="https://..."></label>
+                        <label>CUSTOM_WEBHOOK_URL <input id="cfgCustomWebhookUrl" class="input" placeholder="https://..."></label>
+                        <label>NOTIFY_TEMPLATE <textarea id="cfgNotifyTemplate" class="textarea" rows="6" placeholder="可插入：{{skill_hits}} {{rag_sources}} {{fix_path}}"></textarea></label>
+                    </div>
+                    <div class="hint">模板位点：技能命中摘要 / RAG 调用链图链接 / 修复建议与参考文档链接</div>
+                </div>
+            </section>
+
+            <!-- Logs -->
+            <section class="page" data-page="logs">
+                <div class="page-header">
+                    <h2>系统日志</h2>
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadLogs" type="button">刷新</button>
+                        <button class="btn danger" id="btnClearLogs" type="button">清空</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table" id="logsTable">
+                            <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>级别</th>
+                                <th>类型</th>
+                                <th>消息</th>
+                                <th>Meta</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="hint">内容：用户操作、RAG 检索、技能读取等（轻量 UI 日志）</div>
+            </section>
+        </main>
+    </div>
+</div>
+
+<!-- Modal: API Key -->
+<div class="modal-backdrop" id="keyBackdrop" hidden></div>
+<div class="modal" id="keyModal" hidden>
+    <div class="modal-header">
+        <div class="modal-title">设置 Admin API Key</div>
+        <button class="btn" id="btnCloseKey" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <label>ADMIN_API_KEY <input id="adminKeyInput" class="input" type="password" placeholder="输入 Admin API Key"></label>
+        <div class="actions">
+            <button class="btn primary" id="btnSaveKey" type="button">保存到 Cookie（7 天）</button>
+            <button class="btn danger" id="btnClearKey" type="button">清除 Cookie</button>
+        </div>
+        <div class="hint">Cookie：<code>ADMIN_API_KEY</code></div>
+    </div>
+</div>
+
+<!-- Modal: Skill Doc -->
+<div class="modal-backdrop" id="skillBackdrop" hidden></div>
+<div class="modal large" id="skillModal" hidden>
+    <div class="modal-header">
+        <div class="modal-title" id="skillModalTitle">Skill</div>
+        <button class="btn" id="btnCloseSkill" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <pre class="pre" id="skillDoc"></pre>
+    </div>
+</div>
+
+<!-- Modal: Project Settings -->
+<div class="modal-backdrop" id="projectBackdrop" hidden></div>
+<div class="modal large" id="projectModal" hidden>
+    <div class="modal-header">
+        <div class="modal-title" id="projectModalTitle">项目设置</div>
+        <button class="btn" id="btnCloseProject" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <div class="grid two">
+            <div class="card inner">
+                <div class="card-title">RAG 数据源配置</div>
+                <div class="form-grid">
+                    <label class="check"><input type="checkbox" id="projRagEnabled"> 启用 RAG</label>
+                    <label class="check"><input type="checkbox" id="projRagCode"> 代码索引/上下文</label>
+                    <label class="check"><input type="checkbox" id="projRagDocs"> 文档库</label>
+                    <label class="check"><input type="checkbox" id="projRagDeps"> 依赖文档</label>
+                </div>
+                <div class="form-grid">
+                    <label>索引策略
+                        <select id="projIndexStrategy" class="select">
+                            <option value="commit">按提交</option>
+                            <option value="schedule">按定时</option>
+                        </select>
+                    </label>
+                    <label>分支 <input id="projBranch" class="input" placeholder="main"></label>
+                    <label>语言解析器
+                        <select id="projParser" class="select">
+                            <option value="python">Python</option>
+                            <option value="java">Java</option>
+                            <option value="go">Go</option>
+                            <option value="js">JS/TS</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <label class="check"><input type="checkbox" id="projCallChainEnabled"> 调用链补全</label>
+                    <label>最大深度 <input type="number" id="projCallChainDepth" class="input" min="1" max="10" value="3"></label>
+                    <label class="check"><input type="checkbox" id="projCallChainCrossFile"> 跨文件</label>
+                </div>
+            </div>
+            <div class="card inner">
+                <div class="card-title">Skill 绑定</div>
+                <div class="hint">为项目绑定默认技能集（支持项目级覆盖与版本化位点）</div>
+                <div id="projectSkillPicker" class="skill-picker"></div>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="btn primary" id="btnSaveProjectSettings" type="button">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Review Detail -->
+<div class="modal-backdrop" id="reviewBackdrop" hidden></div>
+<div class="modal large" id="reviewModal" hidden>
+    <div class="modal-header">
+        <div class="modal-title" id="reviewModalTitle">审查详情</div>
+        <button class="btn" id="btnCloseReview" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <div class="grid two">
+            <div class="card inner">
+                <div class="card-title">函数调用链图（RAG 生成）</div>
+                <pre class="pre" id="callGraphPre">加载中...</pre>
+                <div class="actions">
+                    <button class="btn" id="btnRebuildCallGraph" type="button">重建调用链</button>
+                </div>
+            </div>
+            <div class="card inner">
+                <div class="card-title">技能检查清单命中项（位点）</div>
+                <div id="skillHitsBox" class="tags"></div>
+                <div class="hint">当前为启发式命中（后续可接入模型输出的真实命中项）</div>
+            </div>
+        </div>
+        <div class="card inner">
+            <div class="card-title">审查原始输出（按 commit）</div>
+            <pre class="pre" id="reviewRawPre"></pre>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/console.js') }}"></script>
+</body>
+</html>
+

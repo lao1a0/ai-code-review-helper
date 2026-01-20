@@ -1,22 +1,26 @@
 import atexit
+import json
 import logging
+import re
 import sys  # 新增导入
 from concurrent.futures import ThreadPoolExecutor
 from flask import render_template, redirect, Flask
 from flask import request, abort, jsonify
-from langchain.storage import redis
+import redis
 import services.llm_service as llm_service_module
 import hook.push_process
 import hook.routes_detailed
 import hook.routes_general
+import config.core_config as core_config_module
 from config.core_config import gitlab_project_configs, remove_processed_commit_entries_for_pr_mr, \
     is_commit_processed, github_repo_configs, SERVER_HOST, SERVER_PORT, init_redis_client, app_configs, \
     load_configs_from_redis, ADMIN_API_KEY
 from services.llm_service import initialize_openai_client
 from services.vcs_service import get_gitlab_mr_changes
-from config.utils import verify_github_signature, verify_gitlab_signature
+from config.utils import verify_github_signature, verify_gitlab_signature, require_admin_key
 from hook.helpers import handle_async_task_exception
 from config.config_routes import app as config_app
+from web_console_routes import app as console_app
 
 # NOTE: config.core_config loads .env at import time so module-level settings like
 # ADMIN_API_KEY are correct even when core_config is imported indirectly (e.g., via
@@ -24,6 +28,7 @@ from config.config_routes import app as config_app
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 # 注册配置相关的路由
 app.register_blueprint(config_app)
+app.register_blueprint(console_app)
 
 executor = ThreadPoolExecutor(max_workers=20)  # 您可以根据需要调整 max_workers
 
@@ -35,13 +40,252 @@ def review_results_page():
 
 @app.route('/')
 def index():
-    # Keep backward compatibility for the old entry point.
-    return redirect('/admin')
+    return render_template('chat.html')
+
+
+@app.route('/chat')
+def chat_page():
+    return render_template('chat.html')
 
 
 @app.route('/admin')
 def admin_page():
     return render_template('admin.html')
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return "<empty>"
+    if len(value) <= 8:
+        return "<set>"
+    return f"...{value[-4:]}"
+
+
+def _extract_kv_pairs(text: str) -> dict:
+    """
+    Extract key/value pairs from free-form text.
+    Supports:
+      - key=value
+      - key: value
+      - key：value
+    Values may be quoted.
+    """
+    pairs = {}
+    key_re = r"(repo_full_name|repo|owner_repo|project_id|secret|token|instance_url|url)"
+    val_re = r"(\"[^\"]*\"|'[^']*'|[^\\s,]+)"
+    for m in re.finditer(key_re + r"\s*[:=：]\s*" + val_re, text, flags=re.IGNORECASE):
+        k = (m.group(1) or "").lower()
+        v = (m.group(2) or "").strip()
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        pairs[k] = v
+    return pairs
+
+
+def _parse_agent_command(message: str) -> dict:
+    msg = (message or "").strip()
+    if not msg:
+        return {"action": "noop"}
+
+    lowered = msg.lower()
+
+    if lowered in {"help", "?", "h", "\u5e2e\u52a9"} or "\u5e2e\u52a9" in msg:
+        return {"action": "help"}
+
+    # JSON-first (more reliable).
+    if msg.startswith("{") and msg.endswith("}"):
+        try:
+            payload = json.loads(msg)
+            if isinstance(payload, dict) and payload.get("action"):
+                return payload
+        except Exception:
+            pass
+
+    if ("\u5217\u51fa" in msg or "list" in lowered) and "github" in lowered:
+        return {"action": "github_list"}
+    if ("\u5217\u51fa" in msg or "list" in lowered) and "gitlab" in lowered:
+        return {"action": "gitlab_list"}
+
+    if ("\u5220\u9664" in msg or "delete" in lowered) and "github" in lowered:
+        repo_match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", msg)
+        return {"action": "github_delete", "repo_full_name": repo_match.group(1) if repo_match else None}
+    if ("\u5220\u9664" in msg or "delete" in lowered) and "gitlab" in lowered:
+        pid_match = re.search(r"\b(\d+)\b", msg)
+        return {"action": "gitlab_delete", "project_id": pid_match.group(1) if pid_match else None}
+
+    if ("\u6dfb\u52a0" in msg or "add" in lowered or "\u66f4\u65b0" in msg or "update" in lowered) and "github" in lowered:
+        repo_match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", msg)
+        kv = _extract_kv_pairs(msg)
+        return {
+            "action": "github_add",
+            "repo_full_name": kv.get("repo_full_name") or kv.get("repo") or (repo_match.group(1) if repo_match else None),
+            "secret": kv.get("secret"),
+            "token": kv.get("token"),
+        }
+
+    if ("\u6dfb\u52a0" in msg or "add" in lowered or "\u66f4\u65b0" in msg or "update" in lowered) and "gitlab" in lowered:
+        kv = _extract_kv_pairs(msg)
+        pid_match = re.search(r"\b(\d+)\b", msg)
+        return {
+            "action": "gitlab_add",
+            "project_id": kv.get("project_id") or (pid_match.group(1) if pid_match else None),
+            "secret": kv.get("secret"),
+            "token": kv.get("token"),
+            "instance_url": kv.get("instance_url") or kv.get("url"),
+        }
+
+    return {"action": "unknown", "message": msg}
+
+
+def _agent_help_text() -> str:
+    return (
+        "我可以帮你配置 GitHub / GitLab。\\n\\n"
+        "常用指令：\\n"
+        "- 列出 GitHub 仓库\\n"
+        "- 添加 GitHub：owner/repo secret=xxx token=yyy\\n"
+        "- 删除 GitHub：owner/repo\\n"
+        "- 列出 GitLab 项目\\n"
+        "- 添加 GitLab：project_id=123 secret=xxx token=yyy (instance_url 可选)\\n"
+        "- 删除 GitLab：project_id=123\\n\\n"
+        "也可以直接发 JSON（更稳定）：\\n"
+        "{\\\"action\\\":\\\"github_add\\\",\\\"repo_full_name\\\":\\\"owner/repo\\\",\\\"secret\\\":\\\"xxx\\\",\\\"token\\\":\\\"yyy\\\"}\\n"
+        "{\\\"action\\\":\\\"gitlab_add\\\",\\\"project_id\\\":\\\"123\\\",\\\"secret\\\":\\\"xxx\\\",\\\"token\\\":\\\"yyy\\\",\\\"instance_url\\\":\\\"https://gitlab.example.com\\\"}"
+    )
+
+
+def _agent_help_text() -> str:
+    # ASCII-only source to avoid mojibake if the file encoding is mis-detected.
+    return (
+        "\u6211\u53ef\u4ee5\u5e2e\u4f60\u914d\u7f6e GitHub / GitLab\u3002\n\n"
+        "\u5e38\u7528\u6307\u4ee4\uff1a\n"
+        "- \u5217\u51fa GitHub \u4ed3\u5e93\n"
+        "- \u6dfb\u52a0 GitHub\uff1aowner/repo secret=xxx token=yyy\n"
+        "- \u5220\u9664 GitHub\uff1aowner/repo\n"
+        "- \u5217\u51fa GitLab \u9879\u76ee\n"
+        "- \u6dfb\u52a0 GitLab\uff1aproject_id=123 secret=xxx token=yyy (instance_url \u53ef\u9009)\n"
+        "- \u5220\u9664 GitLab\uff1aproject_id=123\n\n"
+        "\u4e5f\u53ef\u4ee5\u76f4\u63a5\u53d1 JSON\uff08\u66f4\u7a33\u5b9a\uff09\uff1a\n"
+        "{\"action\":\"github_add\",\"repo_full_name\":\"owner/repo\",\"secret\":\"xxx\",\"token\":\"yyy\"}\n"
+        "{\"action\":\"gitlab_add\",\"project_id\":\"123\",\"secret\":\"xxx\",\"token\":\"yyy\",\"instance_url\":\"https://gitlab.example.com\"}"
+    )
+
+
+@app.route('/api/agent/chat', methods=['POST'])
+@require_admin_key
+def agent_chat_api():
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "Missing field: message"}), 400
+
+    cmd = _parse_agent_command(message)
+    action = (cmd.get("action") or "").strip()
+
+    if action == "help":
+        return jsonify({"reply": _agent_help_text()}), 200
+
+    if action == "github_list":
+        repos = sorted(list(github_repo_configs.keys()))
+        if not repos:
+            return jsonify({"reply": "当前没有配置任何 GitHub 仓库。"}), 200
+        return jsonify({"reply": "已配置的 GitHub 仓库：\n- " + "\n- ".join(repos)}), 200
+
+    if action == "gitlab_list":
+        projects = sorted(list(gitlab_project_configs.keys()), key=lambda x: int(x) if str(x).isdigit() else str(x))
+        if not projects:
+            return jsonify({"reply": "当前没有配置任何 GitLab 项目。"}), 200
+        return jsonify({"reply": "已配置的 GitLab 项目：\n- " + "\n- ".join(projects)}), 200
+
+    if action == "github_delete":
+        repo_full_name = cmd.get("repo_full_name")
+        if not repo_full_name:
+            return jsonify({"reply": "请提供要删除的 GitHub 仓库全名，例如：删除 GitHub：owner/repo"}), 200
+        if repo_full_name not in github_repo_configs:
+            return jsonify({"reply": f"未找到 GitHub 仓库配置：{repo_full_name}"}), 200
+        del github_repo_configs[repo_full_name]
+        if core_config_module.redis_client:
+            try:
+                core_config_module.redis_client.hdel(core_config_module.REDIS_GITHUB_CONFIGS_KEY, repo_full_name)
+            except Exception:
+                logger.exception("Failed to delete GitHub config from Redis: %s", repo_full_name)
+        return jsonify({"reply": f"已删除 GitHub 仓库配置：{repo_full_name}"}), 200
+
+    if action == "gitlab_delete":
+        project_id = cmd.get("project_id")
+        if not project_id:
+            return jsonify({"reply": "请提供要删除的 GitLab project_id，例如：删除 GitLab：project_id=123"}), 200
+        project_id_str = str(project_id)
+        if project_id_str not in gitlab_project_configs:
+            return jsonify({"reply": f"未找到 GitLab 项目配置：{project_id_str}"}), 200
+        del gitlab_project_configs[project_id_str]
+        if core_config_module.redis_client:
+            try:
+                core_config_module.redis_client.hdel(core_config_module.REDIS_GITLAB_CONFIGS_KEY, project_id_str)
+            except Exception:
+                logger.exception("Failed to delete GitLab config from Redis: %s", project_id_str)
+        return jsonify({"reply": f"已删除 GitLab 项目配置：{project_id_str}"}), 200
+
+    if action == "github_add":
+        repo_full_name = (cmd.get("repo_full_name") or "").strip()
+        secret = (cmd.get("secret") or "").strip()
+        token = (cmd.get("token") or "").strip()
+        missing = [k for k, v in (("repo_full_name", repo_full_name), ("secret", secret), ("token", token)) if not v]
+        if missing:
+            return jsonify({"reply": "缺少字段：" + ", ".join(missing) + "\n\n" + _agent_help_text()}), 200
+
+        config_data = {"secret": secret, "token": token}
+        github_repo_configs[repo_full_name] = config_data
+        if core_config_module.redis_client:
+            try:
+                core_config_module.redis_client.hset(
+                    core_config_module.REDIS_GITHUB_CONFIGS_KEY, repo_full_name, json.dumps(config_data)
+                )
+            except Exception:
+                logger.exception("Failed to save GitHub config to Redis: %s", repo_full_name)
+
+        return jsonify({
+            "reply": (
+                f"已添加/更新 GitHub 仓库：{repo_full_name}\n"
+                f"- secret: {_mask_secret(secret)}\n"
+                f"- token: {_mask_secret(token)}"
+            )
+        }), 200
+
+    if action == "gitlab_add":
+        project_id = (cmd.get("project_id") or "").strip()
+        secret = (cmd.get("secret") or "").strip()
+        token = (cmd.get("token") or "").strip()
+        instance_url = (cmd.get("instance_url") or "").strip()
+        missing = [k for k, v in (("project_id", project_id), ("secret", secret), ("token", token)) if not v]
+        if missing:
+            return jsonify({"reply": "缺少字段：" + ", ".join(missing) + "\n\n" + _agent_help_text()}), 200
+
+        project_id_str = str(project_id)
+        config_data = {"secret": secret, "token": token}
+        if instance_url:
+            config_data["instance_url"] = instance_url
+        gitlab_project_configs[project_id_str] = config_data
+        if core_config_module.redis_client:
+            try:
+                core_config_module.redis_client.hset(
+                    core_config_module.REDIS_GITLAB_CONFIGS_KEY, project_id_str, json.dumps(config_data)
+                )
+            except Exception:
+                logger.exception("Failed to save GitLab config to Redis: %s", project_id_str)
+
+        reply = (
+            f"已添加/更新 GitLab 项目：{project_id_str}\n"
+            f"- secret: {_mask_secret(secret)}\n"
+            f"- token: {_mask_secret(token)}"
+        )
+        if instance_url:
+            reply += f"\n- instance_url: {instance_url}"
+        return jsonify({"reply": reply}), 200
+
+    return jsonify({"reply": "我没理解你的输入。\n\n" + _agent_help_text()}), 200
 
 
 @app.route('/gitlab_webhook', methods=['POST'])
@@ -534,9 +778,7 @@ if __name__ == '__main__':
     logger.info("--- 当前应用配置 ---")
     for key, value in app_configs.items():
         if "KEY" in key.upper() or "TOKEN" in key.upper() or "PASSWORD" in key.upper() or "SECRET" in key.upper():  # Basic redaction for logs
-            if value and len(value) > 8:
-                logger.info(f"  {key}: ...{value[-4:]}")
-            elif value:
+            if value:
                 logger.info(f"  {key}: <已设置>")
             else:
                 logger.info(f"  {key}: <未设置>")

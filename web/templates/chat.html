@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Review Helper - 对话配置</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+</head>
+<body>
+<div class="app-shell">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-title">AI Code Review Helper</div>
+            <div class="brand-subtitle">用对话配置 GitHub / GitLab 仓库</div>
+        </div>
+        <div class="topbar-actions">
+            <a class="link" href="/console" target="_blank">控制台</a>
+            <a class="link" href="/admin" target="_blank">管理面板</a>
+            <a class="link" href="/review_results" target="_blank">审查记录</a>
+            <button class="btn" id="btnSettings" type="button">设置</button>
+        </div>
+    </header>
+
+    <main class="main">
+        <section class="chat">
+            <div class="messages" id="messages" aria-live="polite"></div>
+
+            <div class="composer">
+                <div class="chips" id="chips">
+                    <button class="chip" type="button" data-fill="列出 GitHub 仓库">列出 GitHub</button>
+                    <button class="chip" type="button" data-fill="列出 GitLab 项目">列出 GitLab</button>
+                    <button class="chip" type="button" data-fill="添加 GitHub：owner/repo secret=xxx token=yyy">添加 GitHub</button>
+                    <button class="chip" type="button" data-fill="添加 GitLab：project_id=123 secret=xxx token=yyy instance_url=https://gitlab.example.com">添加 GitLab</button>
+                    <button class="chip" type="button" data-fill="帮助">帮助</button>
+                </div>
+
+                <div class="composer-row">
+                    <textarea id="input" class="input" rows="1" placeholder="输入你的需求，例如：添加 GitHub owner/repo secret=... token=..."></textarea>
+                    <button id="send" class="btn primary" type="button">发送</button>
+                </div>
+                <div class="hint" id="hint">
+                    提示：本页会使用浏览器 Cookie 中的 <code>ADMIN_API_KEY</code> 访问配置接口。
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop" hidden></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+    <div class="modal-header">
+        <div id="modalTitle" class="modal-title">设置</div>
+        <button class="btn" id="btnClose" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <label class="label" for="adminKey">Admin API Key</label>
+        <input id="adminKey" class="text" type="password" placeholder="输入 ADMIN_API_KEY">
+        <div class="modal-actions">
+            <button class="btn primary" id="btnSaveKey" type="button">保存</button>
+            <button class="btn danger" id="btnClearKey" type="button">清除</button>
+        </div>
+        <div class="hint">
+            说明：保存后会写入 Cookie：<code>ADMIN_API_KEY</code>（7 天有效）。
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+</body>
+</html>

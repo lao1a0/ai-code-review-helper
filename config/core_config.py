@@ -78,7 +78,18 @@ def load_app_configs_from_env():
             "PUSH_AUDIT_ENABLED": env_values.get("PUSH_AUDIT_ENABLED", "true").lower() == "true",
             "PUSH_AUDIT_MAX_FILES": int(env_values.get("PUSH_AUDIT_MAX_FILES", "20")),
             "PUSH_AUDIT_POST_COMMIT_COMMENT": env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT",
-                                                             "true").lower() == "true", }
+                                                             "true").lower() == "true",
+
+            # --- LLM + RAG + Skill policies (used by the console; stored in app_configs so /config/global_settings can manage them) ---
+            "LLM_TEMPERATURE": float(env_values.get("LLM_TEMPERATURE", "0.2")),
+            "LLM_MAX_CONTEXT_TOKENS": int(env_values.get("LLM_MAX_CONTEXT_TOKENS", "8000")),
+            "TOOL_CALL_POLICY": env_values.get("TOOL_CALL_POLICY", "auto"),
+            "RAG_TRIGGER_POLICY": env_values.get("RAG_TRIGGER_POLICY", "on_demand"),
+            "SKILL_READ_POLICY": env_values.get("SKILL_READ_POLICY", "on_demand"),
+
+            # --- Notification template (placeholder) ---
+            "NOTIFY_TEMPLATE": env_values.get("NOTIFY_TEMPLATE", ""),
+            }
 
 
 # Load .env into os.environ before reading module-level settings like ADMIN_API_KEY.
