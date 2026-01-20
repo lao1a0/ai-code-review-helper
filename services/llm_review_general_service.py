@@ -1,8 +1,9 @@
 import json
 import logging
-from api.core_config import app_configs
-from .llm_client_manager import get_openai_client, execute_llm_chat_completion
-from api.prompt.prompt_loader import get_prompt
+
+from config.core_config import app_configs
+from prompt.prompt_loader import get_prompt
+from services.llm_client_manager import get_openai_client, execute_llm_chat_completion
 
 logger = logging.getLogger(__name__)
 

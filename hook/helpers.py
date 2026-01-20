@@ -1,6 +1,7 @@
 import logging
 import datetime
-from api.core_config import save_review_results
+
+from config.core_config import save_review_results
 
 logger = logging.getLogger(__name__)
 
@@ -31,3 +32,24 @@ def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, 
     except Exception as e:
         # save_review_results 内部已经有错误日志，这里可以捕获更通用的错误或决定是否需要额外日志
         logger.error(f"调用 save_review_results 时发生意外错误 ({vcs_type} {identifier}#{pr_mr_id}, Commit: {commit_sha}): {e}")
+
+def handle_async_task_exception(future, logger_app_factory=None):
+    """
+    处理 ThreadPoolExecutor 提交的异步任务中未捕获的异常。
+    此函数作为 Future 对象的完成回调。
+    """
+    try:
+        exception = future.exception()
+        if exception:
+            # 使用 logger 记录异常和堆栈跟踪
+            logger_app_factory.error(
+                f"后台异步任务执行失败。",
+                exc_info=exception  # 这会自动包含堆栈跟踪
+            )
+            # 这里可以根据需要添加其他错误处理逻辑，例如发送通知
+    except Exception as e:
+        # 捕获回调函数本身可能发生的任何错误
+        logger_app_factory.error(
+            f"处理异步任务异常的回调函数自身发生错误: {e}",
+            exc_info=True
+        )

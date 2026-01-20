@@ -3,11 +3,10 @@ import json
 import logging
 from typing import Optional
 from urllib.parse import quote
-
 import requests
 
-from api.core_config import app_configs, gitlab_project_configs
-from api.utils import parse_single_file_diff
+from config.core_config import app_configs, gitlab_project_configs
+from config.utils import parse_single_file_diff
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ def get_github_pr_changes(owner, repo_name, pull_number, access_token):
         logger.error(f"错误: 仓库 {owner}/{repo_name} 未配置访问令牌。")
         return None
 
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     files_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/pulls/{pull_number}/files"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"}
 
@@ -242,13 +241,13 @@ def get_github_pr_data_for_general_review(owner: str, repo_name: str, pull_numbe
                                           pr_data: dict):
     """
     为 GitHub PR 获取粗粒度审查所需的数据：文件列表、每个文件的 diff、旧内容和新内容。
-    pr_data 是 GitHub PR webhook 负载中的 'pull_request' 对象。
+    pr_data 是 GitHub PR hook 负载中的 'pull_request' 对象。
     """
     if not access_token:
         logger.error(f"错误: 仓库 {owner}/{repo_name} 未配置访问令牌。")
         return None
 
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     files_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/pulls/{pull_number}/files"
     base_sha = pr_data.get('base', {}).get('sha')
     # head_sha = pr_data.get('head', {}).get('sha') # raw_url is already at head
@@ -310,7 +309,7 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
                                           position_info: dict):
     """
     为 GitLab MR 获取粗粒度审查所需的数据：文件列表、每个文件的 diff、旧内容和新内容。
-    mr_attrs 是 GitLab MR webhook 负载中的 'object_attributes'。
+    mr_attrs 是 GitLab MR hook 负载中的 'object_attributes'。
     position_info 包含 'base_commit_sha', 'start_commit_sha', 'head_commit_sha'。
     """
     if not access_token:
@@ -324,7 +323,7 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
 
     base_sha = position_info.get("base_commit_sha")
     head_sha = position_info.get("head_commit_sha")
-    if not head_sha:  # Fallback to last_commit from webhook payload if not in position_info
+    if not head_sha:  # Fallback to last_commit from hook payload if not in position_info
         head_sha = mr_attrs.get('last_commit', {}).get('id')
 
     if not base_sha or not head_sha:
@@ -411,7 +410,7 @@ def add_github_pr_comment(owner, repo_name, pull_number, access_token, review, h
         logger.error("错误: 无法添加评论，缺少 head_sha。")
         return False
 
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/pulls/{pull_number}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
         "Content-Type": "application/json"}
@@ -442,7 +441,7 @@ def add_github_pr_comment(owner, repo_name, pull_number, access_token, review, h
         target_desc = f"file {file_path} line {lines_info['new']}"
 
     if not line_comment_possible:
-        current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+        current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
         general_comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/issues/{pull_number}/comments"
         general_payload = {"body": f"**AI Review Comment (File: {file_path})**\n\n{body}"}
         target_desc = f"针对文件 {file_path} 的通用 PR 评论"
@@ -467,7 +466,7 @@ def add_github_pr_comment(owner, repo_name, pull_number, access_token, review, h
 
         if line_comment_possible and current_url_to_use == comment_url:
             logger.warning("由于特定行评论错误，回退到作为通用 PR 评论发布。")
-            current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+            current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
             general_comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/issues/{pull_number}/comments"
             fallback_payload = {"body": f"**(评论原针对 {target_desc})**\n\n{body}"}
             try:
@@ -596,7 +595,7 @@ def add_github_pr_general_comment(owner: str, repo_name: str, pull_number: int, 
         logger.info("粗粒度审查文本为空，不添加评论。")
         return True  # Technically successful as there's nothing to post
 
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     # General PR comments are posted as issue comments
     comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/issues/{pull_number}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
@@ -663,7 +662,7 @@ def get_github_branch_head_sha(owner: str, repo_name: str, branch_name: str, acc
     if not access_token:
         logger.error("错误: 缺少 GitHub access token，无法获取分支 head SHA。")
         return None
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     url = f"{current_github_api_url}/repos/{owner}/{repo_name}/branches/{branch_name}"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"}
     try:
@@ -698,7 +697,7 @@ def get_github_push_changes(owner: str, repo_name: str, before_sha: str, after_s
                 f"GitHub Push: before 为全 0 且无法解析 default_branch base，跳过 diff 获取 ({owner}/{repo_name})")
             return {}
 
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     compare_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/compare/{base_sha}...{after_sha}"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"}
 
@@ -754,7 +753,7 @@ def add_github_commit_comment(owner: str, repo_name: str, commit_sha: str, acces
         return False
     if not body or not body.strip():
         return True
-    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://api.github.com")
+    current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     url = f"{current_github_api_url}/repos/{owner}/{repo_name}/commits/{commit_sha}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
         "Content-Type": "application/json", }

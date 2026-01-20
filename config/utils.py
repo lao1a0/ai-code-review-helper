@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import request, abort
 
-from api.core_config import ADMIN_API_KEY
+from config.core_config import ADMIN_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +76,25 @@ def parse_single_file_diff(diff_text, file_path, old_file_path=None):
 
 
 def require_admin_key(f):
-    """装饰器：验证请求头中是否包含正确的 Admin API Key"""
+    """装饰器：验证请求中是否包含正确的 Admin API Key。
+
+    Supports:
+    - Header: X-Admin-API-Key
+    - Cookie: ADMIN_API_KEY (useful for direct browser access after visiting /admin)
+    """
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        api_key = request.headers.get('X-Admin-API-Key')
-        if not api_key or not hmac.compare_digest(api_key, ADMIN_API_KEY):
-            logger.warning("检测到对配置端点的未授权访问尝试。")
-            abort(401, "未授权: X-Admin-API-Key 请求头无效或缺失。")
+        api_key = request.headers.get('X-Admin-API-Key') or request.cookies.get('ADMIN_API_KEY')
+        if not api_key:
+            logger.warning("检测到对配置端点的未授权访问尝试（缺少 Admin Key）。ip=%s path=%s",
+                           request.remote_addr, request.path)
+            abort(401, "未授权: 缺少 Admin Key（X-Admin-API-Key 请求头或 ADMIN_API_KEY Cookie）。")
+
+        if not hmac.compare_digest(api_key, ADMIN_API_KEY):
+            logger.warning("检测到对配置端点的未授权访问尝试（Admin Key 无效）。ip=%s path=%s",
+                           request.remote_addr, request.path)
+            abort(401, "未授权: Admin Key 无效。")
         return f(*args, **kwargs)
 
     return decorated_function

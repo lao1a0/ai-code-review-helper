@@ -1,6 +1,7 @@
 import requests
-from api.core_config import app_configs
 import logging
+
+from config.core_config import app_configs
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ def _send_notification(url: str, payload: dict, service_name: str):
         # 检查企业微信特定的错误码
         if service_name == "企业微信机器人" and response.json().get("errcode") != 0:
             logger.error(f"发送摘要到 {service_name} 时出错: {response.text}")
-        # 对于自定义 webhook，我们假设 2xx 状态码表示成功
+        # 对于自定义 hook，我们假设 2xx 状态码表示成功
         elif service_name == "自定义 Webhook":
             logger.info(f"成功发送摘要到 {service_name}。状态码: {response.status_code}")
         # 其他情况或企业微信成功

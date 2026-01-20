@@ -1,18 +1,12 @@
-import json
-import logging
+from flask import request, jsonify, Blueprint  # 使用 Blueprint 替代 Flask
 
-from flask import request, jsonify
-
-import api.core_config as core_config_module  # 访问 redis_client 的推荐方式
-from api.app_factory import app
-from api.core_config import (app_configs, github_repo_configs, gitlab_project_configs, REDIS_GITHUB_CONFIGS_KEY,
-                             REDIS_GITLAB_CONFIGS_KEY, get_all_reviewed_prs_mrs_keys, get_review_results,
-                             delete_review_results_for_pr_mr  # 新增导入
-                             )
-from api.services.llm_service import initialize_openai_client
-from api.utils import require_admin_key
+import config.core_config as core_config_module  # 访问 redis_client 的推荐方式
+from config.core_config import *
+from services.llm_service import initialize_openai_client
+from config.utils import require_admin_key
 
 logger = logging.getLogger(__name__)
+app = Blueprint('config_app', __name__)  # 创建蓝图而不是Flask应用
 
 
 # GitHub Configuration Management
