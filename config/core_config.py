@@ -5,9 +5,27 @@ from pathlib import Path
 from typing import Optional
 
 import redis
-from dotenv import dotenv_values
+from dotenv import dotenv_values, load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+def _load_env_file():
+    env_file_override = os.environ.get("ENV_FILE")
+    candidates = []
+    if env_file_override:
+        candidates.append(Path(env_file_override))
+    candidates.extend([Path.cwd() / ".env", Path(__file__).resolve().parent / ".env"])
+
+    for candidate in candidates:
+        try:
+            if candidate and candidate.is_file():
+                load_dotenv(dotenv_path=str(candidate), override=False)
+                return str(candidate)
+        except OSError:
+            continue
+    load_dotenv(override=False)
+    return None
 
 
 def _resolve_env_file_path() -> Optional[str]:
@@ -43,23 +61,24 @@ def load_app_configs_from_env():
     else:
         env_values = dotenv_values(env_path)
     return {"OPENAI_API_BASE_URL": env_values.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
-        "OPENAI_API_KEY": env_values.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
-        "OPENAI_MODEL": env_values.get("OPENAI_MODEL", "gpt-4o"),
-        "GITHUB_API_URL": env_values.get("GITHUB_API_URL", "https://api.github.com"),
-        "GITHUB_ACCESS_TOKEN": env_values.get("GITHUB_ACCESS_TOKEN", ""),
-        "GITLAB_API_URL": env_values.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
-        "GITLAB_INSTANCE_URL": env_values.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
-        "WECOM_BOT_WEBHOOK_URL": env_values.get("WECOM_BOT_WEBHOOK_URL", ""), # Redis 配置 (新增)
-        "REDIS_HOST": env_values.get("REDIS_HOST"), "REDIS_PORT": int(env_values.get("REDIS_PORT", "6379")),
-        "REDIS_PASSWORD": env_values.get("REDIS_PASSWORD"),
-        "REDIS_SSL_ENABLED": env_values.get("REDIS_SSL_ENABLED", "true").lower() == "true",
-        "REDIS_DB": int(env_values.get("REDIS_DB", "0")),
-        "CUSTOM_WEBHOOK_URL": env_values.get("CUSTOM_WEBHOOK_URL", ""),  # 新增：自定义通知 Webhook URL
+            "OPENAI_API_KEY": env_values.get("OPENAI_API_KEY", "xxxx-xxxx-xxxx-xxxx"),
+            "OPENAI_MODEL": env_values.get("OPENAI_MODEL", "gpt-4o"),
+            "GITHUB_API_URL": env_values.get("GITHUB_API_URL", "https://api.github.com"),
+            "GITHUB_ACCESS_TOKEN": env_values.get("GITHUB_ACCESS_TOKEN", ""),
+            "GITLAB_API_URL": env_values.get("GITLAB_API_URL", "https://gitlab.com/api/v4"),
+            "GITLAB_INSTANCE_URL": env_values.get("GITLAB_INSTANCE_URL", "https://gitlab.com"),
+            "WECOM_BOT_WEBHOOK_URL": env_values.get("WECOM_BOT_WEBHOOK_URL", ""),  # Redis 配置 (新增)
+            "REDIS_HOST": env_values.get("REDIS_HOST"), "REDIS_PORT": int(env_values.get("REDIS_PORT", "6379")),
+            "REDIS_PASSWORD": env_values.get("REDIS_PASSWORD"),
+            "REDIS_SSL_ENABLED": env_values.get("REDIS_SSL_ENABLED", "true").lower() == "true",
+            "REDIS_DB": int(env_values.get("REDIS_DB", "0")),
+            "CUSTOM_WEBHOOK_URL": env_values.get("CUSTOM_WEBHOOK_URL", ""),  # 新增：自定义通知 Webhook URL
 
-        # Push 审计（Git push webhook）配置
-        "PUSH_AUDIT_ENABLED": env_values.get("PUSH_AUDIT_ENABLED", "true").lower() == "true",
-        "PUSH_AUDIT_MAX_FILES": int(env_values.get("PUSH_AUDIT_MAX_FILES", "20")),
-        "PUSH_AUDIT_POST_COMMIT_COMMENT": env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT", "true").lower() == "true", }
+            # Push 审计（Git push hook）配置
+            "PUSH_AUDIT_ENABLED": env_values.get("PUSH_AUDIT_ENABLED", "true").lower() == "true",
+            "PUSH_AUDIT_MAX_FILES": int(env_values.get("PUSH_AUDIT_MAX_FILES", "20")),
+            "PUSH_AUDIT_POST_COMMIT_COMMENT": env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT",
+                                                             "true").lower() == "true", }
 
 
 # --- 全局配置 ---
@@ -95,21 +114,15 @@ def init_redis_client():
     try:
         logger.info(f"尝试连接到 Redis: {redis_host}:{app_configs.get('REDIS_PORT')}")
         redis_client = redis.Redis(host=redis_host, port=app_configs.get("REDIS_PORT"),
-            password=app_configs.get("REDIS_PASSWORD"), ssl=app_configs.get("REDIS_SSL_ENABLED"),
-            db=app_configs.get("REDIS_DB"), socket_connect_timeout=5  # 5 seconds timeout
-        )
+                                   password=app_configs.get("REDIS_PASSWORD"), ssl=app_configs.get("REDIS_SSL_ENABLED"),
+                                   db=app_configs.get("REDIS_DB"), socket_connect_timeout=5  # 5 seconds timeout
+                                   )
         redis_client.ping()  # 验证连接
         logger.info("成功连接到 Redis。")
-    except redis.exceptions.ConnectionError as e:
-        err_msg = f"连接 Redis 失败: {e}。请检查 Redis 配置和可用性。服务无法启动。"
-        logger.critical(err_msg)
-        redis_client = None  # 确保客户端状态为 None
-        raise redis.exceptions.ConnectionError(err_msg)  # 重新引发，以便主程序捕获
+        return redis_client
     except Exception as e:
-        err_msg = f"Redis 初始化期间发生意外错误: {e}。服务无法启动。"
-        logger.critical(err_msg)
-        redis_client = None  # 确保客户端状态为 None
-        raise ValueError(err_msg)  # 引发通用错误
+        logger.critical(e)
+        raise ValueError(e)  # 引发通用错误
 
 
 def load_configs_from_redis():
@@ -401,17 +414,13 @@ def get_all_reviewed_prs_mrs_keys():
                     except Exception as e_meta:
                         logger.error(f"从 Redis Key '{key}' 获取元数据时出错: {e_meta}")
 
-                    identifiers.append({
-                        "key": key,
-                        "vcs_type": vcs_type_full,
-                        "identifier": identifier_str,
-                        "pr_mr_id": pr_mr_id,
-                        "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}",
-                        "created_at": metadata.get('created_at', ''),
-                        "branch": metadata.get('branch', ''),
-                        "last_commit_sha": metadata.get('last_commit_sha', ''),
-                        "project_name": metadata.get('project_name', display_identifier) if vcs_type_full.startswith('gitlab') else display_identifier
-                    })
+                    identifiers.append(
+                        {"key": key, "vcs_type": vcs_type_full, "identifier": identifier_str, "pr_mr_id": pr_mr_id,
+                         "display_name": f"{display_vcs_type_prefix}: {display_identifier} #{pr_mr_id}",
+                         "created_at": metadata.get('created_at', ''), "branch": metadata.get('branch', ''),
+                         "last_commit_sha": metadata.get('last_commit_sha', ''),
+                         "project_name": metadata.get('project_name', display_identifier) if vcs_type_full.startswith(
+                             'gitlab') else display_identifier})
             except Exception as e:
                 logger.error(f"解析审查结果 Redis Key '{key}' 时出错: {e}")
         return identifiers

@@ -80,7 +80,7 @@ REDIS_PASSWORD=
 REDIS_SSL_ENABLED=false
 REDIS_DB=0
 
-# Push Audit (optional, for Git push webhook)
+# Push Audit (optional, for Git push hook)
 PUSH_AUDIT_ENABLED=true
 PUSH_AUDIT_MAX_FILES=20
 PUSH_AUDIT_POST_COMMIT_COMMENT=true

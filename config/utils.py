@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import request, abort
 
-from api.core_config import ADMIN_API_KEY
+from config.core_config import ADMIN_API_KEY
 
 logger = logging.getLogger(__name__)
 

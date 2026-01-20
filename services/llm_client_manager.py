@@ -1,11 +1,14 @@
 import logging
 import re
 from openai import OpenAI, APIError # 导入 APIError
-from api.core_config import app_configs
+
+from config.core_config import app_configs
 
 logger = logging.getLogger(__name__)
 
 openai_client = None
+
+
 
 def initialize_openai_client():
     """根据 app_configs 初始化或重新初始化全局 OpenAI 客户端。"""
