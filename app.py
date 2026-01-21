@@ -1,36 +1,33 @@
 import atexit
 import json
 import logging
-import re
 import sys  # 新增导入
 from concurrent.futures import ThreadPoolExecutor
-from flask import render_template, redirect, Flask
-from flask import request, abort, jsonify
+
 import redis
-import services.llm_service as llm_service_module
+from flask import redirect, Flask
+from flask import request, abort, jsonify
+
+import config.core_config as core_config_module
 import hook.push_process
 import hook.routes_detailed
 import hook.routes_general
-import config.core_config as core_config_module
-from config.core_config import gitlab_project_configs, remove_processed_commit_entries_for_pr_mr, \
-    is_commit_processed, github_repo_configs, SERVER_HOST, SERVER_PORT, init_redis_client, app_configs, \
-    load_configs_from_redis, ADMIN_API_KEY
+import services.llm_service as llm_service_module
+from config.config_routes import app as config_app
+from config.core_config import gitlab_project_configs, remove_processed_commit_entries_for_pr_mr, is_commit_processed, github_repo_configs, SERVER_HOST, SERVER_PORT, init_redis_client, app_configs, load_configs_from_redis, ADMIN_API_KEY
+from config.utils import verify_github_signature, verify_gitlab_signature, require_admin_key, _parse_agent_command, _agent_help_text
+from hook.helpers import handle_async_task_exception
 from services.llm_service import initialize_openai_client
 from services.vcs_service import get_gitlab_mr_changes
-from config.utils import verify_github_signature, verify_gitlab_signature, require_admin_key
-from hook.helpers import handle_async_task_exception
-from config.config_routes import app as config_app
 from web_console_routes import app as console_app
 
-# NOTE: config.core_config loads .env at import time so module-level settings like
-# ADMIN_API_KEY are correct even when core_config is imported indirectly (e.g., via
-# services.*) before this file runs.
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 # 注册配置相关的路由
 app.register_blueprint(config_app)
 app.register_blueprint(console_app)
 
 executor = ThreadPoolExecutor(max_workers=20)  # 您可以根据需要调整 max_workers
+
 
 @app.route('/review_results')
 def review_results_page():
@@ -59,115 +56,6 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "<set>"
     return f"...{value[-4:]}"
-
-
-def _extract_kv_pairs(text: str) -> dict:
-    """
-    Extract key/value pairs from free-form text.
-    Supports:
-      - key=value
-      - key: value
-      - key：value
-    Values may be quoted.
-    """
-    pairs = {}
-    key_re = r"(repo_full_name|repo|owner_repo|project_id|secret|token|instance_url|url)"
-    val_re = r"(\"[^\"]*\"|'[^']*'|[^\\s,]+)"
-    for m in re.finditer(key_re + r"\s*[:=：]\s*" + val_re, text, flags=re.IGNORECASE):
-        k = (m.group(1) or "").lower()
-        v = (m.group(2) or "").strip()
-        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
-            v = v[1:-1]
-        pairs[k] = v
-    return pairs
-
-
-def _parse_agent_command(message: str) -> dict:
-    msg = (message or "").strip()
-    if not msg:
-        return {"action": "noop"}
-
-    lowered = msg.lower()
-
-    if lowered in {"help", "?", "h", "\u5e2e\u52a9"} or "\u5e2e\u52a9" in msg:
-        return {"action": "help"}
-
-    # JSON-first (more reliable).
-    if msg.startswith("{") and msg.endswith("}"):
-        try:
-            payload = json.loads(msg)
-            if isinstance(payload, dict) and payload.get("action"):
-                return payload
-        except Exception:
-            pass
-
-    if ("\u5217\u51fa" in msg or "list" in lowered) and "github" in lowered:
-        return {"action": "github_list"}
-    if ("\u5217\u51fa" in msg or "list" in lowered) and "gitlab" in lowered:
-        return {"action": "gitlab_list"}
-
-    if ("\u5220\u9664" in msg or "delete" in lowered) and "github" in lowered:
-        repo_match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", msg)
-        return {"action": "github_delete", "repo_full_name": repo_match.group(1) if repo_match else None}
-    if ("\u5220\u9664" in msg or "delete" in lowered) and "gitlab" in lowered:
-        pid_match = re.search(r"\b(\d+)\b", msg)
-        return {"action": "gitlab_delete", "project_id": pid_match.group(1) if pid_match else None}
-
-    if ("\u6dfb\u52a0" in msg or "add" in lowered or "\u66f4\u65b0" in msg or "update" in lowered) and "github" in lowered:
-        repo_match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", msg)
-        kv = _extract_kv_pairs(msg)
-        return {
-            "action": "github_add",
-            "repo_full_name": kv.get("repo_full_name") or kv.get("repo") or (repo_match.group(1) if repo_match else None),
-            "secret": kv.get("secret"),
-            "token": kv.get("token"),
-        }
-
-    if ("\u6dfb\u52a0" in msg or "add" in lowered or "\u66f4\u65b0" in msg or "update" in lowered) and "gitlab" in lowered:
-        kv = _extract_kv_pairs(msg)
-        pid_match = re.search(r"\b(\d+)\b", msg)
-        return {
-            "action": "gitlab_add",
-            "project_id": kv.get("project_id") or (pid_match.group(1) if pid_match else None),
-            "secret": kv.get("secret"),
-            "token": kv.get("token"),
-            "instance_url": kv.get("instance_url") or kv.get("url"),
-        }
-
-    return {"action": "unknown", "message": msg}
-
-
-def _agent_help_text() -> str:
-    return (
-        "我可以帮你配置 GitHub / GitLab。\\n\\n"
-        "常用指令：\\n"
-        "- 列出 GitHub 仓库\\n"
-        "- 添加 GitHub：owner/repo secret=xxx token=yyy\\n"
-        "- 删除 GitHub：owner/repo\\n"
-        "- 列出 GitLab 项目\\n"
-        "- 添加 GitLab：project_id=123 secret=xxx token=yyy (instance_url 可选)\\n"
-        "- 删除 GitLab：project_id=123\\n\\n"
-        "也可以直接发 JSON（更稳定）：\\n"
-        "{\\\"action\\\":\\\"github_add\\\",\\\"repo_full_name\\\":\\\"owner/repo\\\",\\\"secret\\\":\\\"xxx\\\",\\\"token\\\":\\\"yyy\\\"}\\n"
-        "{\\\"action\\\":\\\"gitlab_add\\\",\\\"project_id\\\":\\\"123\\\",\\\"secret\\\":\\\"xxx\\\",\\\"token\\\":\\\"yyy\\\",\\\"instance_url\\\":\\\"https://gitlab.example.com\\\"}"
-    )
-
-
-def _agent_help_text() -> str:
-    # ASCII-only source to avoid mojibake if the file encoding is mis-detected.
-    return (
-        "\u6211\u53ef\u4ee5\u5e2e\u4f60\u914d\u7f6e GitHub / GitLab\u3002\n\n"
-        "\u5e38\u7528\u6307\u4ee4\uff1a\n"
-        "- \u5217\u51fa GitHub \u4ed3\u5e93\n"
-        "- \u6dfb\u52a0 GitHub\uff1aowner/repo secret=xxx token=yyy\n"
-        "- \u5220\u9664 GitHub\uff1aowner/repo\n"
-        "- \u5217\u51fa GitLab \u9879\u76ee\n"
-        "- \u6dfb\u52a0 GitLab\uff1aproject_id=123 secret=xxx token=yyy (instance_url \u53ef\u9009)\n"
-        "- \u5220\u9664 GitLab\uff1aproject_id=123\n\n"
-        "\u4e5f\u53ef\u4ee5\u76f4\u63a5\u53d1 JSON\uff08\u66f4\u7a33\u5b9a\uff09\uff1a\n"
-        "{\"action\":\"github_add\",\"repo_full_name\":\"owner/repo\",\"secret\":\"xxx\",\"token\":\"yyy\"}\n"
-        "{\"action\":\"gitlab_add\",\"project_id\":\"123\",\"secret\":\"xxx\",\"token\":\"yyy\",\"instance_url\":\"https://gitlab.example.com\"}"
-    )
 
 
 @app.route('/api/agent/chat', methods=['POST'])
@@ -240,19 +128,13 @@ def agent_chat_api():
         github_repo_configs[repo_full_name] = config_data
         if core_config_module.redis_client:
             try:
-                core_config_module.redis_client.hset(
-                    core_config_module.REDIS_GITHUB_CONFIGS_KEY, repo_full_name, json.dumps(config_data)
-                )
+                core_config_module.redis_client.hset(core_config_module.REDIS_GITHUB_CONFIGS_KEY, repo_full_name, json.dumps(config_data))
             except Exception:
                 logger.exception("Failed to save GitHub config to Redis: %s", repo_full_name)
 
-        return jsonify({
-            "reply": (
-                f"已添加/更新 GitHub 仓库：{repo_full_name}\n"
-                f"- secret: {_mask_secret(secret)}\n"
-                f"- token: {_mask_secret(token)}"
-            )
-        }), 200
+        return jsonify({"reply": (f"已添加/更新 GitHub 仓库：{repo_full_name}\n"
+                                  f"- secret: {_mask_secret(secret)}\n"
+                                  f"- token: {_mask_secret(token)}")}), 200
 
     if action == "gitlab_add":
         project_id = (cmd.get("project_id") or "").strip()
@@ -270,17 +152,13 @@ def agent_chat_api():
         gitlab_project_configs[project_id_str] = config_data
         if core_config_module.redis_client:
             try:
-                core_config_module.redis_client.hset(
-                    core_config_module.REDIS_GITLAB_CONFIGS_KEY, project_id_str, json.dumps(config_data)
-                )
+                core_config_module.redis_client.hset(core_config_module.REDIS_GITLAB_CONFIGS_KEY, project_id_str, json.dumps(config_data))
             except Exception:
                 logger.exception("Failed to save GitLab config to Redis: %s", project_id_str)
 
-        reply = (
-            f"已添加/更新 GitLab 项目：{project_id_str}\n"
-            f"- secret: {_mask_secret(secret)}\n"
-            f"- token: {_mask_secret(token)}"
-        )
+        reply = (f"已添加/更新 GitLab 项目：{project_id_str}\n"
+                 f"- secret: {_mask_secret(secret)}\n"
+                 f"- token: {_mask_secret(token)}")
         if instance_url:
             reply += f"\n- instance_url: {instance_url}"
         return jsonify({"reply": reply}), 200
@@ -339,8 +217,7 @@ def gitlab_webhook():
 
     if mr_action in ['close', 'merge'] or mr_state in ['closed', 'merged']:
         mr_iid_str = str(mr_iid)
-        logger.info(
-            f"GitLab: MR {project_id_str}#{mr_iid_str} 已 {mr_action if mr_action in ['close', 'merge'] else mr_state}。正在清理 Redis 记录...")
+        logger.info(f"GitLab: MR {project_id_str}#{mr_iid_str} 已 {mr_action if mr_action in ['close', 'merge'] else mr_state}。正在清理 Redis 记录...")
         remove_processed_commit_entries_for_pr_mr('gitlab', project_id_str, mr_iid_str)
         return f"MR {mr_iid_str} 已 {mr_action if mr_action in ['close', 'merge'] else mr_state}，记录已清理。", 200
 
@@ -356,10 +233,7 @@ def gitlab_webhook():
         return "提交已处理", 200
 
     # 调用提取出来的核心处理逻辑函数 (异步执行)
-    future = executor.submit(hook.routes_detailed._process_gitlab_detailed_payload, access_token=access_token,
-                             project_id_str=project_id_str, mr_iid=mr_iid, head_sha_payload=head_sha_payload,
-                             project_data=project_data, mr_attrs=mr_attrs, project_web_url=project_web_url,
-                             mr_title=mr_title, mr_url=mr_url, project_name_from_payload=project_name_from_payload)
+    future = executor.submit(hook.routes_detailed._process_gitlab_detailed_payload, access_token=access_token, project_id_str=project_id_str, mr_iid=mr_iid, head_sha_payload=head_sha_payload, project_data=project_data, mr_attrs=mr_attrs, project_web_url=project_web_url, mr_title=mr_title, mr_url=mr_url, project_name_from_payload=project_name_from_payload)
     future.add_done_callback(handle_async_task_exception)
 
     logger.info(f"GitLab (详细审查): MR {project_id_str}#{mr_iid} 的处理任务已提交到后台执行。")
@@ -409,8 +283,7 @@ def github_webhook():
 
     if action == 'closed':
         pull_number_str = str(pr_data.get('number'))
-        logger.info(
-            f"GitHub: PR {repo_full_name}#{pull_number_str} 已关闭 (合并状态: {pr_merged})。正在清理 Redis 记录...")
+        logger.info(f"GitHub: PR {repo_full_name}#{pull_number_str} 已关闭 (合并状态: {pr_merged})。正在清理 Redis 记录...")
         remove_processed_commit_entries_for_pr_mr('github', repo_full_name, pull_number_str)
         return f"PR {pull_number_str} 已关闭，记录已清理。", 200
 
@@ -440,11 +313,7 @@ def github_webhook():
         return "提交已处理", 200
 
     # 调用提取出来的核心处理逻辑函数 (异步执行)
-    future = executor.submit(hook.routes_detailed._process_github_detailed_payload, access_token=access_token, owner=owner,
-                             repo_name=repo_name, pull_number=pull_number, head_sha=head_sha,
-                             repo_full_name=repo_full_name, pr_title=pr_title, pr_html_url=pr_html_url,
-                             repo_web_url=repo_web_url, pr_source_branch=pr_source_branch,
-                             pr_target_branch=pr_target_branch)
+    future = executor.submit(hook.routes_detailed._process_github_detailed_payload, access_token=access_token, owner=owner, repo_name=repo_name, pull_number=pull_number, head_sha=head_sha, repo_full_name=repo_full_name, pr_title=pr_title, pr_html_url=pr_html_url, repo_web_url=repo_web_url, pr_source_branch=pr_source_branch, pr_target_branch=pr_target_branch)
     future.add_done_callback(handle_async_task_exception)
 
     logger.info(f"GitHub (详细审查): PR {repo_full_name}#{pull_number} 的处理任务已提交到后台执行。")
@@ -498,8 +367,7 @@ def gitlab_webhook_general():
 
     if mr_action in ['close', 'merge'] or mr_state in ['closed', 'merged']:
         mr_iid_str = str(mr_iid)
-        logger.info(
-            f"GitLab (通用审查): MR {project_id_str}#{mr_iid_str} 已 {mr_action or mr_state}。正在清理已处理的 commit 记录...")
+        logger.info(f"GitLab (通用审查): MR {project_id_str}#{mr_iid_str} 已 {mr_action or mr_state}。正在清理已处理的 commit 记录...")
         remove_processed_commit_entries_for_pr_mr('gitlab_general', project_id_str, mr_iid_str)  # Use distinct type
         return f"MR {mr_iid_str} 已 {mr_action or mr_state}，通用审查相关记录已清理。", 200
 
@@ -514,16 +382,13 @@ def gitlab_webhook_general():
         logger.info(f"GitLab (通用审查): MR {project_id_str}#{mr_iid} 的提交 {head_sha_payload} 已处理。跳过。")
         return "提交已处理", 200
 
-    temp_position_info = {"base_commit_sha": mr_attrs.get("diff_base_sha") or mr_attrs.get("base_commit_sha"),
-                          "head_commit_sha": head_sha_payload, "start_commit_sha": mr_attrs.get("start_commit_sha")}
+    temp_position_info = {"base_commit_sha": mr_attrs.get("diff_base_sha") or mr_attrs.get("base_commit_sha"), "head_commit_sha": head_sha_payload, "start_commit_sha": mr_attrs.get("start_commit_sha")}
     _, version_derived_position_info = get_gitlab_mr_changes(project_id_str, mr_iid, access_token)
 
     final_position_info = temp_position_info
     if version_derived_position_info:
-        final_position_info["base_commit_sha"] = version_derived_position_info.get("base_sha", temp_position_info[
-            "base_commit_sha"])
-        final_position_info["head_commit_sha"] = version_derived_position_info.get("head_sha", temp_position_info[
-            "head_commit_sha"])
+        final_position_info["base_commit_sha"] = version_derived_position_info.get("base_sha", temp_position_info["base_commit_sha"])
+        final_position_info["head_commit_sha"] = version_derived_position_info.get("head_sha", temp_position_info["head_commit_sha"])
         final_position_info["latest_version_id"] = version_derived_position_info.get("id")
 
     if not final_position_info.get("base_commit_sha") or not final_position_info.get("head_commit_sha"):
@@ -533,12 +398,7 @@ def gitlab_webhook_general():
     current_commit_sha_for_ops = final_position_info.get("head_commit_sha", head_sha_payload)
 
     # 调用提取出来的核心处理逻辑函数 (异步执行)
-    future = executor.submit(hook.routes_general._process_gitlab_general_payload, access_token=access_token,
-                             project_id_str=project_id_str, mr_iid=mr_iid, mr_attrs=mr_attrs,
-                             final_position_info=final_position_info, head_sha_payload=head_sha_payload,
-                             current_commit_sha_for_ops=current_commit_sha_for_ops,
-                             project_name_from_payload=project_name_from_payload, project_web_url=project_web_url,
-                             mr_title=mr_title, mr_url=mr_url)
+    future = executor.submit(hook.routes_general._process_gitlab_general_payload, access_token=access_token, project_id_str=project_id_str, mr_iid=mr_iid, mr_attrs=mr_attrs, final_position_info=final_position_info, head_sha_payload=head_sha_payload, current_commit_sha_for_ops=current_commit_sha_for_ops, project_name_from_payload=project_name_from_payload, project_web_url=project_web_url, mr_title=mr_title, mr_url=mr_url)
     future.add_done_callback(handle_async_task_exception)
 
     logger.info(f"GitLab (通用审查): MR {project_id_str}#{mr_iid} 的处理任务已提交到后台执行。")
@@ -588,10 +448,8 @@ def github_webhook_general():
 
     if action == 'closed':
         pull_number_str = str(pr_data.get('number'))
-        logger.info(
-            f"GitHub (通用审查): PR {repo_full_name}#{pull_number_str} 已关闭 (合并状态: {pr_merged})。正在清理已处理的 commit 记录...")
-        remove_processed_commit_entries_for_pr_mr('github_general', repo_full_name,
-                                                  pull_number_str)  # Use distinct type for safety
+        logger.info(f"GitHub (通用审查): PR {repo_full_name}#{pull_number_str} 已关闭 (合并状态: {pr_merged})。正在清理已处理的 commit 记录...")
+        remove_processed_commit_entries_for_pr_mr('github_general', repo_full_name, pull_number_str)  # Use distinct type for safety
         return f"PR {pull_number_str} 已关闭，通用审查相关记录已清理。", 200
 
     if pr_state != 'open' or action not in ['opened', 'reopened', 'synchronize']:
@@ -620,11 +478,7 @@ def github_webhook_general():
         return "提交已处理", 200
 
     # 调用提取出来的核心处理逻辑函数 (异步执行)
-    future = executor.submit(hook.routes_general._process_github_general_payload, access_token=access_token, owner=owner,
-                             repo_name=repo_name, pull_number=pull_number, pr_data=pr_data, head_sha=head_sha,
-                             repo_full_name=repo_full_name, pr_title=pr_title, pr_html_url=pr_html_url,
-                             repo_web_url=repo_web_url, pr_source_branch=pr_source_branch,
-                             pr_target_branch=pr_target_branch)
+    future = executor.submit(hook.routes_general._process_github_general_payload, access_token=access_token, owner=owner, repo_name=repo_name, pull_number=pull_number, pr_data=pr_data, head_sha=head_sha, repo_full_name=repo_full_name, pr_title=pr_title, pr_html_url=pr_html_url, repo_web_url=repo_web_url, pr_source_branch=pr_source_branch, pr_target_branch=pr_target_branch)
     future.add_done_callback(handle_async_task_exception)
 
     logger.info(f"GitHub (通用审查): PR {repo_full_name}#{pull_number} 的处理任务已提交到后台执行。")
@@ -682,10 +536,7 @@ def github_push_webhook():
         logger.info(f"GitHub (Push): {repo_full_name} {audit_id} {after_sha} 已处理，跳过。")
         return jsonify({"message": "Already processed."}), 200
 
-    future = executor.submit(hook.push_process._process_github_push_payload, access_token=access_token, owner=owner,
-                             repo_name=repo_name, repo_full_name=repo_full_name, ref=ref, audit_id=audit_id,
-                             before_sha=before_sha, after_sha=after_sha, created=created, default_branch=default_branch,
-                             repo_web_url=repo_web_url, )
+    future = executor.submit(hook.push_process._process_github_push_payload, access_token=access_token, owner=owner, repo_name=repo_name, repo_full_name=repo_full_name, ref=ref, audit_id=audit_id, before_sha=before_sha, after_sha=after_sha, created=created, default_branch=default_branch, repo_web_url=repo_web_url, )
     future.add_done_callback(handle_async_task_exception)
     return jsonify({"message": "GitHub Push audit task accepted."}), 202
 
@@ -739,10 +590,7 @@ def gitlab_push_webhook():
         logger.info(f"GitLab (Push): {project_id_str} {audit_id} {after_sha} 已处理，跳过。")
         return jsonify({"message": "Already processed."}), 200
 
-    future = executor.submit(hook.push_process._process_gitlab_push_payload, access_token=access_token,
-                             project_id_str=project_id_str, ref=ref, audit_id=audit_id, before_sha=before_sha,
-                             after_sha=after_sha, project_name=project_name, project_web_url=project_web_url,
-                             created=created, default_branch=default_branch, )
+    future = executor.submit(hook.push_process._process_gitlab_push_payload, access_token=access_token, project_id_str=project_id_str, ref=ref, audit_id=audit_id, before_sha=before_sha, after_sha=after_sha, project_name=project_name, project_web_url=project_web_url, created=created, default_branch=default_branch, )
     future.add_done_callback(handle_async_task_exception)
     return jsonify({"message": "GitLab Push audit task accepted."}), 202
 
@@ -750,8 +598,7 @@ def gitlab_push_webhook():
 # --- 主程序入口 ---
 if __name__ == '__main__':
     # 配置日志记录
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        handlers=[logging.StreamHandler()])  # 输出到控制台
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler()])  # 输出到控制台
     logger = logging.getLogger(__name__)
 
     logger.info(f"启动统一代码审查 Webhook 服务于 {SERVER_HOST}:{SERVER_PORT}")
@@ -764,15 +611,13 @@ if __name__ == '__main__':
     try:
         if init_redis_client() is None:
             logger.critical("关键错误: Redis 配置错误")
-            logger.critical(
-                "服务无法启动。请确保 Redis 相关环境变量 (如 REDIS_HOST, REDIS_PORT) 已正确设置，并且 Redis 服务可用。")
+            logger.critical("服务无法启动。请确保 Redis 相关环境变量 (如 REDIS_HOST, REDIS_PORT) 已正确设置，并且 Redis 服务可用。")
             sys.exit(1)
         logger.info(f"Redis 连接: 成功连接到 {app_configs.get('REDIS_HOST')}:{app_configs.get('REDIS_PORT')}")
         load_configs_from_redis()  # 这会填充 github_repo_configs 和 gitlab_project_configs
     except (ValueError, redis.exceptions.ConnectionError) as e:
         logger.critical(f"关键错误: Redis 初始化失败 - {e}")
-        logger.critical(
-            "服务无法启动。请确保 Redis 相关环境变量 (如 REDIS_HOST, REDIS_PORT) 已正确设置，并且 Redis 服务可用。")
+        logger.critical("服务无法启动。请确保 Redis 相关环境变量 (如 REDIS_HOST, REDIS_PORT) 已正确设置，并且 Redis 服务可用。")
         sys.exit(1)
 
     logger.info("--- 当前应用配置 ---")
@@ -794,8 +639,7 @@ if __name__ == '__main__':
         logger.info("提示: WECOM_BOT_WEBHOOK_URL 未设置。企业微信机器人通知将被禁用。")
     else:
         url_parts = app_configs.get("WECOM_BOT_WEBHOOK_URL").split('?')
-        key_preview = app_configs.get("WECOM_BOT_WEBHOOK_URL")[-6:] if len(
-            app_configs.get("WECOM_BOT_WEBHOOK_URL")) > 6 else ''
+        key_preview = app_configs.get("WECOM_BOT_WEBHOOK_URL")[-6:] if len(app_configs.get("WECOM_BOT_WEBHOOK_URL")) > 6 else ''
         logger.info(f"企业微信机器人通知已启用，URL: {url_parts[0]}?key=...{key_preview}")
 
     if not app_configs.get("CUSTOM_WEBHOOK_URL"):
@@ -805,8 +649,7 @@ if __name__ == '__main__':
 
     # Check openai_client status after initial attempt
     if not llm_service_module.openai_client:  # Check via module attribute
-        logger.warning(
-            "警告: OpenAI 客户端无法根据当前设置初始化。在通过管理面板或环境变量提供有效的 OpenAI 配置之前，AI 审查功能将无法工作。")
+        logger.warning("警告: OpenAI 客户端无法根据当前设置初始化。在通过管理面板或环境变量提供有效的 OpenAI 配置之前，AI 审查功能将无法工作。")
 
     # Redis 状态的日志记录已在初始化部分处理，如果程序运行到此处，说明 Redis 已成功连接。
     # 此处不再需要重复的 Redis 状态日志。
@@ -817,34 +660,24 @@ if __name__ == '__main__':
     logger.info(f"控制台页面位于: http://localhost:{SERVER_PORT}/console")
 
     logger.info("全局设置配置 (通过管理面板或 API):")
-    logger.info(
-        f"  查看: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/global_settings")
+    logger.info(f"  查看: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/global_settings")
     logger.info(f"  更新: curl -X POST -H \"Content-Type: application/json\" -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" \\")
-    logger.info(
-        f"    -d '{{\"OPENAI_MODEL\": \"gpt-3.5-turbo\", \"WECOM_BOT_WEBHOOK_URL\": \"YOUR_WECOM_URL\", \"CUSTOM_WEBHOOK_URL\": \"YOUR_CUSTOM_URL\"}}' \\")  # Example
+    logger.info(f"    -d '{{\"OPENAI_MODEL\": \"gpt-3.5-turbo\", \"WECOM_BOT_WEBHOOK_URL\": \"YOUR_WECOM_URL\", \"CUSTOM_WEBHOOK_URL\": \"YOUR_CUSTOM_URL\"}}' \\")  # Example
     logger.info(f"    http://localhost:{SERVER_PORT}/config/global_settings")
 
     logger.info("GitHub 仓库配置示例 (通过管理面板或 API):")
-    logger.info(
-        f"  添加/更新: curl -X POST -H \"Content-Type: application/json\" -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" \\")
-    logger.info(
-        f"    -d '{{\"repo_full_name\": \"owner/repo\", \"secret\": \"YOUR_GH_WEBHOOK_SECRET\", \"token\": \"YOUR_GITHUB_TOKEN\"}}' \\")
+    logger.info(f"  添加/更新: curl -X POST -H \"Content-Type: application/json\" -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" \\")
+    logger.info(f"    -d '{{\"repo_full_name\": \"owner/repo\", \"secret\": \"YOUR_GH_WEBHOOK_SECRET\", \"token\": \"YOUR_GITHUB_TOKEN\"}}' \\")
     logger.info(f"    http://localhost:{SERVER_PORT}/config/github/repo")
-    logger.info(
-        f"  删除: curl -X DELETE -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/github/repo/owner/repo")
-    logger.info(
-        f"  列表: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/github/repos")
+    logger.info(f"  删除: curl -X DELETE -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/github/repo/owner/repo")
+    logger.info(f"  列表: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/github/repos")
 
     logger.info("GitLab 项目配置示例 (通过管理面板或 API):")
-    logger.info(
-        f"  添加/更新: curl -X POST -H \"Content-Type: application/json\" -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" \\")
-    logger.info(
-        f"    -d '{{\"project_id\": 123, \"secret\": \"YOUR_GL_WEBHOOK_SECRET\", \"token\": \"YOUR_GITLAB_TOKEN\"}}' \\")
+    logger.info(f"  添加/更新: curl -X POST -H \"Content-Type: application/json\" -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" \\")
+    logger.info(f"    -d '{{\"project_id\": 123, \"secret\": \"YOUR_GL_WEBHOOK_SECRET\", \"token\": \"YOUR_GITLAB_TOKEN\"}}' \\")
     logger.info(f"    http://localhost:{SERVER_PORT}/config/gitlab/project")
-    logger.info(
-        f"  删除: curl -X DELETE -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/gitlab/project/123")
-    logger.info(
-        f"  列表: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/gitlab/projects")
+    logger.info(f"  删除: curl -X DELETE -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/gitlab/project/123")
+    logger.info(f"  列表: curl -X GET -H \"X-Admin-API-Key: YOUR_ADMIN_KEY\" http://localhost:{SERVER_PORT}/config/gitlab/projects")
 
     logger.info("--- Webhook 端点 ---")
     logger.info(f"GitHub Webhook URL (详细审查): http://localhost:{SERVER_PORT}/github_webhook")
