@@ -1,20 +1,15 @@
 import json
 import logging
-from openai import OpenAI
+
 from config.core_config import app_configs
 from prompt.prompt_loader import get_prompt
-from services import llm_client_manager
-from services.llm_client_manager import get_openai_client
+from services.langchain_factory import invoke_chat
 
 logger = logging.getLogger(__name__)
 
 
-def get_openai_code_review(structured_file_changes):
+def get_openai_code_review(structured_file_changes, *, rag_by_file=None):
     """使用 OpenAI API 对结构化的代码变更进行 review (源自 GitHub 版本，通用性较好)"""
-    client = llm_client_manager.get_openai_client()
-    if not client:
-        logger.warning("OpenAI 客户端不可用 (未初始化或初始化失败)。跳过审查。")
-        return "[]"
     if not structured_file_changes:
         logger.info("未提供结构化变更以供审查。")
         return "[]"
@@ -23,15 +18,14 @@ def get_openai_code_review(structured_file_changes):
     current_model = app_configs.get("OPENAI_MODEL", "gpt-4o")
 
     for file_path, file_data in structured_file_changes.items():
-        input_data = {
-            "file_meta": {
-                "path": file_data["path"],
-                "old_path": file_data.get("old_path"),
-                "lines_changed": file_data.get("lines_changed", len(file_data["changes"])),
-                "context": file_data["context"]
-            },
-            "changes": file_data["changes"]
-        }
+        rag_payload = None
+        if isinstance(rag_by_file, dict):
+            rag_payload = rag_by_file.get(file_path)
+        input_data = {"file_meta": {"path": file_data["path"], "old_path": file_data.get("old_path"),
+            "lines_changed": file_data.get("lines_changed", len(file_data["changes"])),
+            "context": file_data["context"]}, "changes": file_data["changes"]}
+        if rag_payload:
+            input_data["rag"] = rag_payload
         try:
             input_json_string = json.dumps(input_data, indent=2, ensure_ascii=False)
         except TypeError as te:
@@ -43,26 +37,14 @@ def get_openai_code_review(structured_file_changes):
 
         try:
             logger.info(f"正在发送文件审查请求: {file_path}...")
-            # Ensure client is fresh if settings changed (get_openai_client handles this)
-            client = get_openai_client()
-            if not client:
-                logger.warning(f"在审查 {file_path} 前 OpenAI 客户端变得不可用。将跳过此文件并继续处理其他文件。")
-                continue
-            
             detailed_review_system_prompt = get_prompt('detailed_review')
-            if "Error: Prompt" in detailed_review_system_prompt: # Check if prompt loading failed
-                logger.error(f"无法加载详细审查的 System Prompt。跳过文件 {file_path}。错误: {detailed_review_system_prompt}")
+            if "Error: Prompt" in detailed_review_system_prompt:  # Check if prompt loading failed
+                logger.error(
+                    f"无法加载详细审查的 System Prompt。跳过文件 {file_path}。错误: {detailed_review_system_prompt}")
                 continue
 
-
-            review_json_str = llm_client_manager.execute_llm_chat_completion(
-                client,
-                current_model,
-                detailed_review_system_prompt,
-                user_prompt_for_llm,
-                "细粒度审查",
-                response_format_type="json_object"
-            )
+            review_json_str = invoke_chat(system_prompt=detailed_review_system_prompt, user_prompt=user_prompt_for_llm,
+                response_format_type="json_object", )
 
             logger.info(f"-------------LLM 输出-----------")
             logger.info(f"文件 {file_path} 的 LLM 原始输出:")
@@ -120,28 +102,22 @@ def get_openai_code_review(structured_file_changes):
     return final_json_output
 
 
-def get_openai_detailed_review_for_file(file_path: str, file_data: dict, client: OpenAI, model_name: str):
+def get_openai_detailed_review_for_file(file_path: str, file_data: dict, model_name: str, *, rag=None, ):
     """
     使用 OpenAI API 对单个文件的结构化代码变更进行详细审查。
     返回一个 Python 列表，其中包含该文件的审查意见字典。
     如果文件没有问题或发生错误，则返回空列表。
     """
-    if not client:
-        logger.warning(f"OpenAI 客户端不可用 (传递给 get_openai_detailed_review_for_file 时)。跳过文件 {file_path} 的审查。")
-        return []
     if not file_data:
         logger.info(f"未提供文件 {file_path} 的数据以供详细审查。")
         return []
 
-    input_data = {
-        "file_meta": {
-            "path": file_data.get("path", file_path), # Ensure path from file_data or argument
-            "old_path": file_data.get("old_path"),
-            "lines_changed": file_data.get("lines_changed", len(file_data.get("changes", []))),
-            "context": file_data.get("context", {})
-        },
-        "changes": file_data.get("changes", [])
-    }
+    input_data = {"file_meta": {"path": file_data.get("path", file_path),  # Ensure path from file_data or argument
+        "old_path": file_data.get("old_path"),
+        "lines_changed": file_data.get("lines_changed", len(file_data.get("changes", []))),
+        "context": file_data.get("context", {})}, "changes": file_data.get("changes", [])}
+    if rag:
+        input_data["rag"] = rag
     try:
         input_json_string = json.dumps(input_data, indent=2, ensure_ascii=False)
     except TypeError as te:
@@ -153,20 +129,14 @@ def get_openai_detailed_review_for_file(file_path: str, file_data: dict, client:
 
     try:
         logger.info(f"正在发送文件审查请求 (详细): {file_path} 给模型 {model_name}...")
-        
+
         detailed_review_system_prompt = get_prompt('detailed_review')
-        if "Error: Prompt" in detailed_review_system_prompt: # Check if prompt loading failed
+        if "Error: Prompt" in detailed_review_system_prompt:  # Check if prompt loading failed
             logger.error(f"无法加载详细审查的 System Prompt。跳过文件 {file_path}。错误: {detailed_review_system_prompt}")
             return []
 
-        review_json_str = llm_client_manager.execute_llm_chat_completion(
-            client,
-            model_name,
-            detailed_review_system_prompt,
-            user_prompt_for_llm,
-            f"文件 {file_path} 的细粒度审查",
-            response_format_type="json_object"
-        )
+        review_json_str = invoke_chat(system_prompt=detailed_review_system_prompt, user_prompt=user_prompt_for_llm,
+            response_format_type="json_object", )
 
         logger.info(f"-------------LLM 输出 (文件: {file_path})-----------")
         logger.info(f"{review_json_str}")
@@ -188,18 +158,18 @@ def get_openai_detailed_review_for_file(file_path: str, file_data: dict, client:
                 if not found_list:
                     logger.warning(
                         f"警告: 文件 {file_path} 的 LLM 输出是一个字典，但未找到列表值。输出: {review_json_str}")
-                    reviews_for_this_file = [parsed_output] # Try to treat as single item
+                    reviews_for_this_file = [parsed_output]  # Try to treat as single item
             else:
-                logger.warning(
-                    f"警告: 文件 {file_path} 的 LLM 输出不是 JSON 列表或预期的字典。输出: {review_json_str}")
-                return [] # Not a valid format
+                logger.warning(f"警告: 文件 {file_path} 的 LLM 输出不是 JSON 列表或预期的字典。输出: {review_json_str}")
+                return []  # Not a valid format
 
             valid_reviews = []
             for review in reviews_for_this_file:
                 if isinstance(review, dict) and all(
                         k in review for k in ["file", "lines", "category", "severity", "analysis", "suggestion"]):
                     if review.get("file") != file_path:
-                        logger.warning(f"警告: 修正审查中的文件路径从 '{review.get('file')}' 为 '{file_path}' (针对文件 {file_path})")
+                        logger.warning(
+                            f"警告: 修正审查中的文件路径从 '{review.get('file')}' 为 '{file_path}' (针对文件 {file_path})")
                         review["file"] = file_path
                     valid_reviews.append(review)
                 else:

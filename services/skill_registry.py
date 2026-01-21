@@ -52,7 +52,7 @@ def _parse_front_matter(markdown_text: str) -> Tuple[Dict[str, Any], str]:
         return {}, markdown_text
 
     fm_text = "\n".join(parts[1:end_idx])
-    body = "\n".join(parts[end_idx + 1 :])
+    body = "\n".join(parts[end_idx + 1:])
     try:
         data = yaml.safe_load(fm_text) or {}
         if not isinstance(data, dict):
@@ -132,4 +132,3 @@ def list_skill_dicts() -> List[Dict[str, Any]]:
             "updated_at": s.updated_at,
         })
     return out
-

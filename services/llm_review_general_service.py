@@ -3,7 +3,7 @@ import logging
 
 from config.core_config import app_configs
 from prompt.prompt_loader import get_prompt
-from services.llm_client_manager import get_openai_client, execute_llm_chat_completion
+from services.langchain_factory import invoke_chat
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,6 @@ def get_openai_code_review_general(file_data: dict):
     返回一个针对该文件的 Markdown 格式审查意见文本字符串。
     如果文件无问题，则返回空字符串或特定无问题指示。
     """
-    client = get_openai_client()
-    if not client:
-        logger.warning("OpenAI 客户端不可用 (未初始化或初始化失败)。跳过单个文件的粗粒度审查。")
-        return "OpenAI client is not available. Skipping general review for single file."
     if not file_data:
         logger.info("未提供文件数据以供单个文件的粗粒度审查。")
         return ""
@@ -30,30 +26,17 @@ def get_openai_code_review_general(file_data: dict):
         return f"Error serializing input data for general review of file {file_data.get('file_path', 'N/A')}."
 
     current_model = app_configs.get("OPENAI_MODEL", "gpt-4o")
-    logger.info(f"正在发送文件 {file_data.get('file_path', 'N/A')} 的粗粒度审查请求给 {current_model}...")
+    logger.info(f"正在发送文件 {file_data.get('file_path', 'N/A')} 的粗粒度审查请求给 {current_model} (LangChain)...")
 
     try:
-        # Ensure client is fresh
-        client = get_openai_client()
-        if not client:
-            logger.warning(f"在审查 {file_data.get('file_path', 'N/A')} 前 OpenAI 客户端变得不可用。")
-            return "OpenAI client is not available. Skipping general review for single file."
-
         general_review_system_prompt = get_prompt('general_review')
-        if "Error: Prompt" in general_review_system_prompt: # Check if prompt loading failed
+        if "Error: Prompt" in general_review_system_prompt:  # Check if prompt loading failed
             error_msg = f"无法加载通用审查的 System Prompt。错误: {general_review_system_prompt}"
             logger.error(error_msg)
-            return error_msg # Return the error message to be potentially shown to user/logged
+            return error_msg
 
-
-        review_text = execute_llm_chat_completion(
-            client,
-            current_model,
-            general_review_system_prompt,
-            user_prompt_content_for_llm,  # This is already the JSON string
-            "粗粒度审查"
-            # No response_format_type for plain text Markdown
-        )
+        review_text = invoke_chat(system_prompt=general_review_system_prompt, user_prompt=user_prompt_content_for_llm,
+            response_format_type=None, )
 
         logger.info(f"-------------LLM 粗粒度审查输出-----------")
         logger.info(review_text)

@@ -27,4 +27,3 @@ def list_events(limit: int = 100) -> List[Dict[str, Any]]:
 
 def clear_events() -> None:
     _LOG_BUFFER.clear()
-

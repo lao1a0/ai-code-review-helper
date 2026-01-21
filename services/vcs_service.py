@@ -3,10 +3,12 @@ import json
 import logging
 from typing import Optional
 from urllib.parse import quote
+
 import requests
 
-from config.core_config import app_configs, gitlab_project_configs
-from config.utils import parse_single_file_diff
+from config.core_config import app_configs
+from config.redis_config import gitlab_project_configs
+from utils.diff_parser import parse_single_file_diff
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +50,14 @@ def get_github_pr_changes(owner, repo_name, pull_number, access_token):
             if status == 'removed':
                 if not file_patch_text:  # Usually removed files might not have a patch, or it's empty
                     file_changes_data = {"path": new_path,  # new_path is the path of the removed file
-                        "old_path": None,
-                        # No old_path if it's just a removal, unless it was renamed then removed (complex case)
-                        "changes": [{"type": "delete", "old_line": 0, "new_line": None, "content": "文件已删除"}],
-                        "context": {"old": "", "new": ""},  # No context for a fully removed file via this path
-                        "lines_changed": 0  # Or count lines if available from another source
-                    }
+                                         "old_path": None,
+                                         # No old_path if it's just a removal, unless it was renamed then removed (complex case)
+                                         "changes": [{"type": "delete", "old_line": 0, "new_line": None,
+                                                      "content": "文件已删除"}],
+                                         "context": {"old": "", "new": ""},
+                                         # No context for a fully removed file via this path
+                                         "lines_changed": 0  # Or count lines if available from another source
+                                         }
                     structured_changes[new_path] = file_changes_data
                     logger.info(f"为 {new_path} 合成了 'removed' 状态。")
                     continue
@@ -122,8 +126,8 @@ def get_gitlab_mr_changes(project_id, mr_iid, access_token):
         if versions_data:
             latest_version = versions_data[0]
             position_info = {"base_sha": latest_version.get("base_commit_sha"),
-                "start_sha": latest_version.get("start_commit_sha"),
-                "head_sha": latest_version.get("head_commit_sha"), }
+                             "start_sha": latest_version.get("start_commit_sha"),
+                             "head_sha": latest_version.get("head_commit_sha"), }
             latest_version_id = latest_version.get("id")
             logger.info(f"从最新版本 (ID: {latest_version_id}) 提取的位置信息: {position_info}")
 
@@ -229,11 +233,8 @@ def _fetch_file_content_from_url(url: str, headers: dict, is_github: bool = Fals
             else:
                 logger.warning(f"从 {url} 获取文件内容时未找到 base64 内容或编码。响应: {data}")
                 return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"从 {url} 获取文件内容时出错: {e}")
-        return None
-    except (json.JSONDecodeError, base64.binascii.Error, UnicodeDecodeError) as e:
-        logger.error(f"解码/解析从 {url} 获取的文件内容时出错: {e}")
+    except Exception as e:
+        logger.exception(f"从 {url} 获取文件内容时出错:")
         return None
 
 
@@ -250,17 +251,10 @@ def get_github_pr_data_for_general_review(owner: str, repo_name: str, pull_numbe
     current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     files_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/pulls/{pull_number}/files"
     base_sha = pr_data.get('base', {}).get('sha')
-    # head_sha = pr_data.get('head', {}).get('sha') # raw_url is already at head
-
     headers_files_api = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"}
-    headers_content_api = {  # For fetching specific file content (potentially base_sha)
+    headers_content_api = {
         "Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"
-        # Gets JSON with base64 content
     }
-    headers_raw_content_api = {  # For fetching raw file content (new_content from raw_url)
-        "Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3.raw"  # Gets raw content directly
-    }
-
     general_review_data = []
 
     try:
@@ -285,13 +279,11 @@ def get_github_pr_data_for_general_review(owner: str, repo_name: str, pull_numbe
             # 获取旧内容 (适用于 'modified', 'removed', 'renamed')
             path_for_old_content = previous_filename if status == 'renamed' and previous_filename else file_path
             if status in ['modified', 'removed', 'renamed'] and base_sha and path_for_old_content:
-                # Check size if available (GitHub files API doesn't give old size directly)
-                # We'll attempt to fetch and let _fetch_file_content_from_url handle large/binary via its internal JSON parsing if not raw
                 old_content_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/contents/{path_for_old_content}?ref={base_sha}"
                 logger.info(f"获取旧内容: {path_for_old_content} (ref: {base_sha}) 从 {old_content_url}")
                 file_data_entry["old_content"] = _fetch_file_content_from_url(old_content_url, headers_content_api,
                                                                               is_github=False,
-                                                                              max_size_bytes=1024 * 1024)  # Not raw, expect JSON, add size limit
+                                                                              max_size_bytes=1024 * 1024)
 
             general_review_data.append(file_data_entry)
 
@@ -334,8 +326,6 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
     headers = {"PRIVATE-TOKEN": access_token}
     general_review_data = []
 
-    # GitLab MR changes are typically fetched via versions API then details of latest version
-    # This gives us the diffs. We then fetch content for each file.
     latest_version_id = position_info.get("latest_version_id")  # Assuming this is passed in position_info
     if not latest_version_id:  # Fallback: try to get versions if not pre-fetched
         versions_url = f"{current_gitlab_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/versions"
@@ -375,10 +365,7 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
             if is_renamed: status = "renamed"
 
             file_data_entry = {"file_path": new_path,  # For deleted files, new_path is the path of the deleted file
-                "status": status, "diff_text": diff_text, "old_content": None}
-
-            # GitLab file content API: /projects/:id/repository/files/:file_path?ref=:sha
-            # File path needs to be URL-encoded.
+                               "status": status, "diff_text": diff_text, "old_content": None}
 
             # Get old content (if not new file)
             path_for_old_content = old_path if old_path else new_path  # If renamed, old_path is correct. If modified, old_path is same as new_path.
@@ -390,10 +377,6 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
                                                                               max_size_bytes=1024 * 1024)
 
             general_review_data.append(file_data_entry)
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"从 GitLab API ({version_detail_url}) 获取粗粒度审查数据时出错: {e}")
-        return None
     except Exception as e:
         logger.exception(f"为 GitLab MR {project_id}#{mr_iid} 准备粗粒度审查数据时发生意外错误:")
         return None
@@ -413,7 +396,7 @@ def add_github_pr_comment(owner, repo_name, pull_number, access_token, review, h
     current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/pulls/{pull_number}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"}
+               "Content-Type": "application/json"}
 
     body = f"""**AI Review [{review.get('severity', 'N/A').upper()}]**: {review.get('category', 'General')}
 
@@ -500,8 +483,7 @@ def add_gitlab_mr_comment(project_id, mr_iid, access_token, review, position_inf
     project_config = gitlab_project_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
 
-    current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL",
-                                                                                   "https://gitlab.com")
+    current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL","https://gitlab.com")
     if project_specific_instance_url:
         logger.info(f"项目 {project_id} 的评论使用项目特定的 GitLab 实例 URL: {project_specific_instance_url}")
     else:
@@ -519,7 +501,7 @@ def add_gitlab_mr_comment(project_id, mr_iid, access_token, review, position_inf
 ```
 """
     position_data = {"base_sha": position_info.get("base_sha"), "start_sha": position_info.get("start_sha"),
-        "head_sha": position_info.get("head_sha"), "position_type": "text", }
+                     "head_sha": position_info.get("head_sha"), "position_type": "text", }
 
     lines_info = review.get("lines", {})
     file_path = review.get("file")
@@ -599,7 +581,7 @@ def add_github_pr_general_comment(owner: str, repo_name: str, pull_number: int, 
     # General PR comments are posted as issue comments
     comment_url = f"{current_github_api_url}/repos/{owner}/{repo_name}/issues/{pull_number}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"}
+               "Content-Type": "application/json"}
     payload = {"body": review_text}
 
     try:
@@ -607,12 +589,6 @@ def add_github_pr_general_comment(owner: str, repo_name: str, pull_number: int, 
         response.raise_for_status()
         logger.info(f"成功向 GitHub PR #{pull_number} 添加粗粒度审查评论。")
         return True
-    except requests.exceptions.RequestException as e:
-        error_message = f"添加 GitHub 粗粒度审查评论时出错: {e}"
-        if 'response' in locals() and response is not None:
-            error_message += f" - 状态: {response.status_code} - 响应体: {response.text[:500]}"
-        logger.error(error_message)
-        return False
     except Exception as e:
         logger.exception(f"添加 GitHub 粗粒度审查评论时发生意外错误:")
         return False
@@ -629,8 +605,7 @@ def add_gitlab_mr_general_comment(project_id: str, mr_iid: int, access_token: st
 
     project_config = gitlab_project_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
-    current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL",
-                                                                                   "https://gitlab.com")
+    current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL","https://gitlab.com")
 
     # Post as a new discussion (thread) without position for general comments
     comment_url = f"{current_gitlab_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/discussions"
@@ -676,7 +651,7 @@ def get_github_branch_head_sha(owner: str, repo_name: str, branch_name: str, acc
 
 
 def get_github_push_changes(owner: str, repo_name: str, before_sha: str, after_sha: str, access_token: str,
-        created: bool = False, default_branch: Optional[str] = None, max_files: int = 20, ):
+                            created: bool = False, default_branch: Optional[str] = None, max_files: int = 20, ):
     """
     使用 GitHub Compare API 获取 push 的文件变更，并解析为结构化 diff（与 PR 详细审查一致）。
 
@@ -723,8 +698,9 @@ def get_github_push_changes(owner: str, repo_name: str, before_sha: str, after_s
 
             if status == "removed" and not file_patch_text:
                 structured_changes[new_path] = {"path": new_path, "old_path": None,
-                    "changes": [{"type": "delete", "old_line": 0, "new_line": None, "content": "文件已删除"}],
-                    "context": {"old": "", "new": ""}, "lines_changed": 0, }
+                                                "changes": [{"type": "delete", "old_line": 0, "new_line": None,
+                                                             "content": "文件已删除"}],
+                                                "context": {"old": "", "new": ""}, "lines_changed": 0, }
                 continue
 
             try:
@@ -735,12 +711,6 @@ def get_github_push_changes(owner: str, repo_name: str, before_sha: str, after_s
                 logger.exception(f"GitHub Push: 解析 diff 失败: {new_path}")
 
         return structured_changes
-    except requests.exceptions.RequestException as e:
-        error_message = f"GitHub Push: 获取 compare 数据失败: {e}"
-        if "resp" in locals() and resp is not None:
-            error_message += f" - 状态 {resp.status_code} - 响应 {resp.text[:500]}"
-        logger.error(error_message)
-        return None
     except Exception:
         logger.exception("GitHub Push: 获取/解析 compare 数据时发生意外错误")
         return None
@@ -756,7 +726,7 @@ def add_github_commit_comment(owner: str, repo_name: str, commit_sha: str, acces
     current_github_api_url = app_configs.get("GITHUB_API_URL", "https://github.com")
     url = f"{current_github_api_url}/repos/{owner}/{repo_name}/commits/{commit_sha}/comments"
     headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json", }
+               "Content-Type": "application/json", }
     payload = {"body": body}
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -769,7 +739,7 @@ def add_github_commit_comment(owner: str, repo_name: str, commit_sha: str, acces
 
 
 def get_gitlab_branch_head_sha(project_id_str: str, branch_name: str, access_token: str,
-        instance_url: Optional[str] = None, ) -> Optional[str]:
+                               instance_url: Optional[str] = None, ) -> Optional[str]:
     if not access_token:
         logger.error("错误: 缺少 GitLab token，无法获取分支 head SHA。")
         return None
@@ -789,8 +759,9 @@ def get_gitlab_branch_head_sha(project_id_str: str, branch_name: str, access_tok
 
 
 def get_gitlab_push_changes(project_id_str: str, before_sha: str, after_sha: str, access_token: str,
-        instance_url: Optional[str] = None, created: bool = False, default_branch: Optional[str] = None,
-        max_files: int = 20, ):
+                            instance_url: Optional[str] = None, created: bool = False,
+                            default_branch: Optional[str] = None,
+                            max_files: int = 20, ):
     """
     使用 GitLab Compare API 获取 push 的文件变更，并解析为结构化 diff（与 MR 详细审查一致）。
 
@@ -837,8 +808,9 @@ def get_gitlab_push_changes(project_id_str: str, before_sha: str, after_sha: str
 
             if deleted_file and not diff_text.strip():
                 structured_changes[new_path] = {"path": new_path, "old_path": old_path,
-                    "changes": [{"type": "delete", "old_line": 0, "new_line": None, "content": "文件已删除"}],
-                    "context": {"old": "", "new": ""}, "lines_changed": 0, }
+                                                "changes": [{"type": "delete", "old_line": 0, "new_line": None,
+                                                             "content": "文件已删除"}],
+                                                "context": {"old": "", "new": ""}, "lines_changed": 0, }
                 continue
 
             if not diff_text.strip() and not deleted_file:
@@ -865,7 +837,7 @@ def get_gitlab_push_changes(project_id_str: str, before_sha: str, after_sha: str
 
 
 def add_gitlab_commit_comment(project_id_str: str, commit_sha: str, access_token: str, note: str,
-        instance_url: Optional[str] = None, ) -> bool:
+                              instance_url: Optional[str] = None, ) -> bool:
     """向 GitLab commit 添加一条评论（用于 push 审计可选输出）。"""
     if not access_token:
         logger.error("错误: 缺少 GitLab token，无法添加 commit 评论。")

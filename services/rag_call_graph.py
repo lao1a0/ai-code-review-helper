@@ -140,4 +140,3 @@ def build_call_graph_from_structured_changes(
         "sources": rag_sources,
         "note": "Call graph is built from diff added lines only (placeholder RAG).",
     }
-

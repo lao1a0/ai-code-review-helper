@@ -135,6 +135,8 @@ def get_project_rag_sources(project_key: Optional[str]) -> List[str]:
         return []
     settings = settings_store.get_project_settings(project_key)
     rag = settings.get("rag") or {}
+    if not rag.get("enabled"):
+        return []
     sources = rag.get("sources") or {}
     out = []
     if sources.get("code", True):
