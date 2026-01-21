@@ -44,13 +44,61 @@ async function apiFetch(url, options = {}) {
     return data;
 }
 
-function openModal(backdropId, modalId) {
-    document.getElementById(backdropId).hidden = false;
-    document.getElementById(modalId).hidden = false;
+const MODAL_STACK = [];
+
+function _applyModalZ() {
+    const base = 1000;
+    MODAL_STACK.forEach((it, i) => {
+        const zBackdrop = base + i * 2;
+        const zModal = base + i * 2 + 1;
+        it.backdrop.style.zIndex = String(zBackdrop);
+        it.modal.style.zIndex = String(zModal);
+    });
+    document.body.style.overflow = MODAL_STACK.length ? 'hidden' : '';
 }
+
+function _removeFromStack(backdropId, modalId) {
+    const idx = MODAL_STACK.findIndex(it => it.backdropId === backdropId && it.modalId === modalId);
+    if (idx >= 0) MODAL_STACK.splice(idx, 1);
+}
+
+function openModal(backdropId, modalId, opts = {}) {
+    const backdrop = document.getElementById(backdropId);
+    const modal = document.getElementById(modalId);
+    if (!backdrop || !modal) return;
+
+    // Avoid "double open" entries.
+    _removeFromStack(backdropId, modalId);
+
+    if (opts.closeOthers) {
+        // Close all other modals first to prevent accidental overlay blocks.
+        for (const it of [...MODAL_STACK].reverse()) {
+            it.backdrop.hidden = true;
+            it.modal.hidden = true;
+        }
+        MODAL_STACK.length = 0;
+    }
+
+    backdrop.hidden = false;
+    modal.hidden = false;
+
+    MODAL_STACK.push({ backdropId, modalId, backdrop, modal });
+    _applyModalZ();
+}
+
 function closeModal(backdropId, modalId) {
-    document.getElementById(backdropId).hidden = true;
-    document.getElementById(modalId).hidden = true;
+    const backdrop = document.getElementById(backdropId);
+    const modal = document.getElementById(modalId);
+    if (backdrop) backdrop.hidden = true;
+    if (modal) modal.hidden = true;
+    _removeFromStack(backdropId, modalId);
+    _applyModalZ();
+}
+
+function closeTopModal() {
+    const top = MODAL_STACK[MODAL_STACK.length - 1];
+    if (!top) return;
+    closeModal(top.backdropId, top.modalId);
 }
 
 function renderTags(container, tags, opts = {}) {
@@ -372,7 +420,7 @@ async function openProjectSettings(projectKey) {
 
     renderSkillPicker(document.getElementById('projectSkillPicker'), settings.skills_enabled || []);
 
-    openModal('projectBackdrop', 'projectModal');
+    openModal('projectBackdrop', 'projectModal', { closeOthers: true });
 }
 
 async function saveProjectSettingsFromUI() {
@@ -413,7 +461,7 @@ async function openReviewDetail(vcsType, identifier, prMrId) {
     document.getElementById('callGraphPre').textContent = '加载中...';
     document.getElementById('reviewRawPre').textContent = '';
     document.getElementById('skillHitsBox').innerHTML = '';
-    openModal('reviewBackdrop', 'reviewModal');
+    openModal('reviewBackdrop', 'reviewModal', { closeOthers: true });
 
     const detail = await apiFetch(`/api/reviews/${encodeURIComponent(vcsType)}/${encodeURIComponent(identifier)}/${encodeURIComponent(prMrId)}`);
     document.getElementById('reviewRawPre').textContent = JSON.stringify(detail.reviews_by_commit || {}, null, 2);
@@ -521,7 +569,7 @@ async function saveGlobalSettingsFromUI() {
 
 async function ensureAdminKey() {
     if (apiKey()) return true;
-    openModal('keyBackdrop', 'keyModal');
+    openModal('keyBackdrop', 'keyModal', { closeOthers: true });
     return false;
 }
 
@@ -540,7 +588,7 @@ async function init() {
     });
 
     // Modals: Admin key
-    document.getElementById('btnSetKey').addEventListener('click', () => openModal('keyBackdrop', 'keyModal'));
+    document.getElementById('btnSetKey').addEventListener('click', () => openModal('keyBackdrop', 'keyModal', { closeOthers: true }));
     document.getElementById('btnCloseKey').addEventListener('click', () => closeModal('keyBackdrop', 'keyModal'));
     document.getElementById('keyBackdrop').addEventListener('click', () => closeModal('keyBackdrop', 'keyModal'));
     document.getElementById('btnSaveKey').addEventListener('click', () => {
@@ -656,3 +704,9 @@ async function bootstrapDashboard() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeTopModal();
+    }
+});

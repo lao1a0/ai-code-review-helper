@@ -94,6 +94,6 @@ PUSH_AUDIT_POST_COMMIT_COMMENT=true
 
 
 ## 🔧 管理面板 
-- 地址：`http://<host>:8088/admin`  
+- 地址：`http://<host>:8088/console`  
 - 用途：增删仓库、改密钥、调模型、看记录  
 - 认证：Header `X-Admin-API-Key` = `ADMIN_API_KEY`

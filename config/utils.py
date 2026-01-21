@@ -80,7 +80,7 @@ def require_admin_key(f):
 
     Supports:
     - Header: X-Admin-API-Key
-    - Cookie: ADMIN_API_KEY (useful for direct browser access after visiting /admin)
+    - Cookie: ADMIN_API_KEY (useful for direct browser access after visiting /console)
     """
 
     @wraps(f)

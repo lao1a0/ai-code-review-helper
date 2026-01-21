@@ -35,22 +35,22 @@ executor = ThreadPoolExecutor(max_workers=20)  # 您可以根据需要调整 max
 @app.route('/review_results')
 def review_results_page():
     """提供AI审查记录查看页面的 HTML 页面"""
-    return render_template('review_results.html')
+    return redirect('/console')
 
 
 @app.route('/')
 def index():
-    return render_template('chat.html')
+    return redirect('/console')
 
 
 @app.route('/chat')
 def chat_page():
-    return render_template('chat.html')
+    return redirect('/console')
 
 
 @app.route('/admin')
 def admin_page():
-    return render_template('admin.html')
+    return redirect('/console')
 
 
 def _mask_secret(value: str) -> str:
@@ -814,7 +814,7 @@ if __name__ == '__main__':
     logger.info("--- 配置管理 API ---")
     logger.info("使用 /config/* 端点管理密钥和令牌。")
     logger.info("需要带有从环境加载的 ADMIN_API_KEY 的 'X-Admin-API-Key' 请求头。")
-    logger.info(f"管理页面位于: http://localhost:{SERVER_PORT}/admin")
+    logger.info(f"控制台页面位于: http://localhost:{SERVER_PORT}/console")
 
     logger.info("全局设置配置 (通过管理面板或 API):")
     logger.info(
