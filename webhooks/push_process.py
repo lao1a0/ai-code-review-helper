@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from config.core_config import app_configs
-from config.redis_config import gitlab_project_configs, github_repo_configs, mark_commit_as_processed
+from config.postgres_config import gitlab_project_configs, github_repo_configs, mark_commit_as_processed
 from services.llm_review_detailed_service import get_openai_detailed_review_for_file
 from services.notification_service import send_notifications
 from services.vcs_service import (

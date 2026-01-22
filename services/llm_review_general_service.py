@@ -2,7 +2,7 @@ import json
 import logging
 
 from config.core_config import app_configs
-from prompt.prompt_loader import get_prompt
+from knowledge.prompt.prompt_loader import get_prompt
 from services.langchain_factory import invoke_chat
 
 logger = logging.getLogger(__name__)

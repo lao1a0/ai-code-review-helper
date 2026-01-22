@@ -9,6 +9,9 @@ from services import settings_store
 
 logger = logging.getLogger(__name__)
 
+# 内存存储RAG索引 (替代Redis)
+_rag_indices: Dict[str, Dict[str, Any]] = {}
+
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -23,7 +26,7 @@ def _require_langchain() -> None:
 
 
 def _rag_index_key(project_key: str, source: str) -> str:
-    return f"{core_config.REDIS_KEY_PREFIX}rag:lc:index:{project_key}:{source}"
+    return f"{core_config.APP_KEY_PREFIX}rag:lc:index:{project_key}:{source}"
 
 
 def _kb_paths(project_key: str, source: str) -> List[Path]:
@@ -109,17 +112,27 @@ def rebuild_index(project_key: str, source: str) -> Dict[str, Any]:
 
     if core_config.redis_client:
         core_config.redis_client.set(_rag_index_key(project_key, source), json.dumps(payload, ensure_ascii=False))
+    # 同时保存到内存
+    _rag_indices[_rag_index_key(project_key, source)] = payload
     return payload
 
 
 def load_index(project_key: str, source: str) -> Optional[Dict[str, Any]]:
     if not project_key or not source:
         return None
+    key = _rag_index_key(project_key, source)
+    # 首先尝试从内存加载
+    if key in _rag_indices:
+        return _rag_indices[key]
+    # 回退到Redis (如果可用)
     if core_config.redis_client:
-        raw = core_config.redis_client.get(_rag_index_key(project_key, source))
+        raw = core_config.redis_client.get(key)
         if raw:
             try:
-                return json.loads(raw.decode("utf-8"))
+                payload = json.loads(raw.decode("utf-8"))
+                # 缓存到内存
+                _rag_indices[key] = payload
+                return payload
             except Exception:
                 return None
     return None

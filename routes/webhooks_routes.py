@@ -3,13 +3,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, abort, jsonify, request
 
-from config.redis_config import (
+from config.postgres_config import (
     gitlab_project_configs,
     github_repo_configs,
     is_commit_processed,
     remove_processed_commit_entries_for_pr_mr,
 )
-from services.langchain_agent import run_agent as run_langchain_agent
+from services.langchain_agent import run_langchain_agent
 from services.vcs_service import get_gitlab_mr_changes
 from utils.agent_commands import agent_help_text, parse_agent_command
 from utils.auth import require_admin_key, verify_github_signature, verify_gitlab_signature

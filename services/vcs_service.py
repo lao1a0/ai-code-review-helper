@@ -7,7 +7,7 @@ from urllib.parse import quote
 import requests
 
 from config.core_config import app_configs
-from config.redis_config import gitlab_project_configs
+from config.postgres_config import gitlab_project_configs
 from utils.diff_parser import parse_single_file_diff
 
 logger = logging.getLogger(__name__)

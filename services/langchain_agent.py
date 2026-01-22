@@ -5,28 +5,24 @@ from typing import Any, Dict, Optional
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
-from config.redis_config import redis_client, REDIS_GITHUB_CONFIGS_KEY, REDIS_GITLAB_CONFIGS_KEY, github_repo_configs, gitlab_project_configs
+from config.postgres_config import github_repo_configs, gitlab_project_configs, save_config_to_postgres, delete_config_from_postgres
 from services.langchain_factory import get_chat_model
 
 logger = logging.getLogger(__name__)
 
 
-def _save_to_redis(hash_key: str, field: str, value: Dict[str, Any]) -> None:
-    if not redis_client:
-        return
+def _save_to_postgres(config_type: str, key: str, value: Dict[str, Any]) -> None:
     try:
-        redis_client.hset(hash_key, field, json.dumps(value, ensure_ascii=False))
+        save_config_to_postgres(config_type, key, value)
     except Exception:
-        logger.exception("Failed to save config to Redis.")
+        logger.exception("Failed to save config to PostgreSQL.")
 
 
-def _delete_from_redis(hash_key: str, field: str) -> None:
-    if not redis_client:
-        return
+def _delete_from_postgres(config_type: str, key: str) -> None:
     try:
-        redis_client.hdel(hash_key, field)
+        delete_config_from_postgres(config_type, key)
     except Exception:
-        logger.exception("Failed to delete config from Redis.")
+        logger.exception("Failed to delete config from PostgreSQL.")
 
 
 def build_agent():
@@ -58,7 +54,7 @@ def build_agent():
             return "secret/token 不能为空。"
         conf = {"secret": secret, "token": token}
         github_repo_configs[repo_full_name] = conf
-        _save_to_redis(REDIS_GITHUB_CONFIGS_KEY, repo_full_name, conf)
+        _save_to_postgres('github', repo_full_name, conf)
         return f"已添加/更新 GitHub 仓库：{repo_full_name}"
 
     @tool
@@ -68,7 +64,7 @@ def build_agent():
         if repo_full_name not in (github_repo_configs or {}):
             return f"未找到 GitHub 仓库配置：{repo_full_name}"
         del github_repo_configs[repo_full_name]
-        _delete_from_redis(REDIS_GITHUB_CONFIGS_KEY, repo_full_name)
+        _delete_from_postgres('github', repo_full_name)
         return f"已删除 GitHub 仓库配置：{repo_full_name}"
 
     @tool
@@ -85,7 +81,7 @@ def build_agent():
         if instance_url:
             conf["instance_url"] = str(instance_url).strip()
         gitlab_project_configs[project_id] = conf
-        _save_to_redis(REDIS_GITLAB_CONFIGS_KEY, project_id, conf)
+        _save_to_postgres('gitlab', project_id, conf)
         return f"已添加/更新 GitLab 项目：{project_id}"
 
     @tool
@@ -95,7 +91,7 @@ def build_agent():
         if project_id not in (gitlab_project_configs or {}):
             return f"未找到 GitLab 项目配置：{project_id}"
         del gitlab_project_configs[project_id]
-        _delete_from_redis(REDIS_GITLAB_CONFIGS_KEY, project_id)
+        _delete_from_postgres('gitlab', project_id)
         return f"已删除 GitLab 项目配置：{project_id}"
 
     system = ("你是一个用于配置本系统 GitHub/GitLab 的运维助手。\n"
@@ -115,7 +111,7 @@ def build_agent():
 _AGENT = None
 
 
-def run_agent(message: str) -> str:
+def run_langchain_agent(message: str) -> str:
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
@@ -137,3 +133,6 @@ def run_agent(message: str) -> str:
     except Exception as e:
         logger.error(f"Agent execution error: {e}")
         return f"执行出错：{str(e)}"
+
+if __name__ == '__main__':
+    run_langchain_agent()

@@ -1,7 +1,7 @@
 import json
 import logging
 from config.core_config import app_configs
-from config.redis_config import mark_commit_as_processed
+from config.postgres_config import mark_commit_as_processed
 from services.llm_review_detailed_service import get_openai_detailed_review_for_file, get_openai_code_review
 from webhooks.push_process import get_final_summary_comment_text
 from webhooks.helpers import _save_review_results_and_log
@@ -59,7 +59,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
         mark_commit_as_processed('github', repo_full_name, str(pull_number), head_sha)
         return
 
-    all_reviews_for_redis = []
+    all_reviews_for_storage = []
     total_comments_posted_successfully = 0
 
     current_model = app_configs.get("OPENAI_MODEL", "gpt-4o")
@@ -93,7 +93,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
         if reviews_for_file_list:  # reviews_for_file_list 是一个 Python 列表
             # Add RAG metadata for the console filters (safe extra keys).
             used_sources = rag_payload.get("sources") or []
-            all_reviews_for_redis.extend(reviews_for_file_list)
+            all_reviews_for_storage.extend(reviews_for_file_list)
             logger.info(
                 f"GitHub (详细审查): 文件 {file_path} 发现 {len(reviews_for_file_list)} 个问题。正在尝试添加评论...")
 
@@ -118,23 +118,23 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
 
     # 所有文件处理完毕后
     logger.info("--- GitHub (详细审查): 所有文件处理完毕 ---")
-    logger.info(f"总共收集到 {len(all_reviews_for_redis)} 条审查意见用于存储。")
+    logger.info(f"总共收集到 {len(all_reviews_for_storage)} 条审查意见用于存储。")
 
-    # 保存所有收集到的审查结果到 Redis
-    final_review_json_for_redis = "[]"
-    if all_reviews_for_redis:
+    # 保存所有收集到的审查结果到数据库
+    final_review_json_for_storage = "[]"
+    if all_reviews_for_storage:
         try:
-            final_review_json_for_redis = json.dumps(all_reviews_for_redis, ensure_ascii=False, indent=2)
+            final_review_json_for_storage = json.dumps(all_reviews_for_storage, ensure_ascii=False, indent=2)
         except TypeError as e:
             logger.error(
-                f"GitHub (详细审查): 序列化最终审查列表到 JSON 时出错: {e}")  # 保留 final_review_json_for_redis 为 "[]"
+                f"GitHub (详细审查): 序列化最终审查列表到 JSON 时出错: {e}")  # 保留 final_review_json_for_storage 为 "[]"
 
     _save_review_results_and_log(vcs_type='github', identifier=repo_full_name, pr_mr_id=str(pull_number),
-                                 commit_sha=head_sha, review_json_string=final_review_json_for_redis,
+                                 commit_sha=head_sha, review_json_string=final_review_json_for_storage,
                                  branch=pr_source_branch)
 
-    # 如果没有任何评论被成功发布 (或 all_reviews_for_redis 为空)
-    if not all_reviews_for_redis:  # 或者 total_comments_posted_successfully == 0
+    # 如果没有任何评论被成功发布 (或 all_reviews_for_storage 为空)
+    if not all_reviews_for_storage:  # 或者 total_comments_posted_successfully == 0
         _post_no_issues_comment(vcs_type='github', comment_function=add_github_pr_comment, owner=owner,
                                 repo_name=repo_name, pull_number=pull_number, access_token=access_token,
                                 head_sha=head_sha)
@@ -142,7 +142,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
     # 发送企业微信通知
     if app_configs.get("WECOM_BOT_WEBHOOK_URL") or app_configs.get("CUSTOM_WEBHOOK_URL"):
         logger.info("GitHub (详细审查): 正在发送摘要通知...")
-        review_summary_line = _get_wecom_summary_line(len(all_reviews_for_redis), 'github')
+        review_summary_line = _get_wecom_summary_line(len(all_reviews_for_storage), 'github')
         summary_content = f"""**AI代码审查完成 (GitHub)**
 
 > 仓库: [{repo_full_name}]({repo_web_url})

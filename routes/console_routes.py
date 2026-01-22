@@ -6,7 +6,7 @@ import yaml
 from flask import Blueprint, jsonify, render_template, request
 
 from config.core_config import app_configs
-from config.redis_config import get_all_reviewed_prs_mrs_keys, get_review_results, gitlab_project_configs, github_repo_configs
+from config.postgres_config import get_all_reviewed_prs_mrs_keys, get_review_results, gitlab_project_configs, github_repo_configs
 from services import app_log, rag_call_graph, rag_service, review_enrichment, settings_store, skill_registry
 from services.vcs_service import get_github_pr_changes, get_gitlab_mr_changes
 from utils.auth import require_admin_key

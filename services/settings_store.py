@@ -1,13 +1,7 @@
 import json
 from typing import Any, Dict
 
-from config.redis_config import REDIS_KEY_PREFIX, redis_client
-
-_MEM_AGENT_SETTINGS: Dict[str, Any] = {}
-_MEM_PROJECT_SETTINGS: Dict[str, Dict[str, Any]] = {}
-
-REDIS_AGENT_SETTINGS_KEY = f"{REDIS_KEY_PREFIX}agent_settings"
-REDIS_PROJECT_SETTINGS_KEY = f"{REDIS_KEY_PREFIX}project_settings"
+# Settings store - now using memory only (previously used Redis)
 
 
 def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -21,24 +15,12 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_agent_settings() -> Dict[str, Any]:
-    if redis_client:
-        try:
-            raw = redis_client.get(REDIS_AGENT_SETTINGS_KEY)
-            if raw:
-                return json.loads(raw.decode("utf-8"))
-        except Exception:
-            pass
     return dict(_MEM_AGENT_SETTINGS)
 
 
 def set_agent_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
     global _MEM_AGENT_SETTINGS
     merged = _deep_merge(get_agent_settings(), patch or {})
-    if redis_client:
-        try:
-            redis_client.set(REDIS_AGENT_SETTINGS_KEY, json.dumps(merged, ensure_ascii=False))
-        except Exception:
-            pass
     _MEM_AGENT_SETTINGS = merged
     return merged
 
@@ -46,13 +28,6 @@ def set_agent_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
 def get_project_settings(project_key: str) -> Dict[str, Any]:
     if not project_key:
         return {}
-    if redis_client:
-        try:
-            raw = redis_client.hget(REDIS_PROJECT_SETTINGS_KEY, project_key)
-            if raw:
-                return json.loads(raw.decode("utf-8"))
-        except Exception:
-            pass
     return dict(_MEM_PROJECT_SETTINGS.get(project_key) or {})
 
 
@@ -60,11 +35,5 @@ def set_project_settings(project_key: str, patch: Dict[str, Any]) -> Dict[str, A
     if not project_key:
         return {}
     merged = _deep_merge(get_project_settings(project_key), patch or {})
-    if redis_client:
-        try:
-            redis_client.hset(REDIS_PROJECT_SETTINGS_KEY, project_key,
-                              json.dumps(merged, ensure_ascii=False))
-        except Exception:
-            pass
     _MEM_PROJECT_SETTINGS[project_key] = merged
     return merged

@@ -4,3 +4,4 @@
 .env
 __pycache__/
 _ref_cyberstrikeai/
+db/postgres_data/*

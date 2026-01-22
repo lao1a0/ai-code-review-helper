@@ -2,13 +2,13 @@ import logging
 import datetime
 from typing import Optional
 
-from config.redis_config import save_review_results
+from config.postgres_config import save_review_results
 
 logger = logging.getLogger(__name__)
 
 
 def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name_for_gitlab: Optional[str] = None, branch: Optional[str] = None):
-    """统一保存审查结果到 Redis（并补齐 created_at 元信息）。"""
+    """统一保存审查结果到数据库（并补齐 created_at 元信息）。"""
     if not commit_sha:
         logger.warning(f"警告: {vcs_type.capitalize()} {identifier}#{pr_mr_id} 的 commit_sha 为空。无法保存审查结果。")
         return

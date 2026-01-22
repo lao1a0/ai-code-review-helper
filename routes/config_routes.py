@@ -2,8 +2,7 @@ import json
 import logging
 from flask import Blueprint, request, jsonify
 import config.core_config as core_config_module
-from config.redis_config import gitlab_project_configs, REDIS_GITLAB_CONFIGS_KEY, github_repo_configs, \
-    REDIS_GITHUB_CONFIGS_KEY, get_all_reviewed_prs_mrs_keys, get_review_results, redis_client
+from config.postgres_config import save_config_to_postgres, delete_config_from_postgres
 from services.llm_client_manager import initialize_openai_client
 from utils.auth import require_admin_key
 
@@ -26,12 +25,12 @@ def add_or_update_github_repo_config():
     config_data = {"secret": secret, "token": token}
     github_repo_configs[repo_full_name] = config_data
 
-    if redis_client:
-        try:
-            redis_client.hset(REDIS_GITHUB_CONFIGS_KEY, repo_full_name, json.dumps(config_data))
-            logger.info("GitHub config %s saved to Redis.", repo_full_name)
-        except Exception as e:
-            logger.error("Failed to save GitHub config %s to Redis: %s", repo_full_name, e)
+    try:
+        save_config_to_postgres('github', repo_full_name, config_data)
+        logger.info("GitHub config %s saved to PostgreSQL.", repo_full_name)
+    except Exception as e:
+        logger.error("Failed to save GitHub config %s to PostgreSQL: %s", repo_full_name, e)
+        return jsonify({"error": f"Failed to save configuration: {str(e)}"}), 500
 
     return jsonify({"message": f"Configuration for GitHub repository {repo_full_name} added/updated."}), 200
 
@@ -41,12 +40,11 @@ def add_or_update_github_repo_config():
 def delete_github_repo_config(repo_full_name):
     if repo_full_name in github_repo_configs:
         del github_repo_configs[repo_full_name]
-        if redis_client:
-            try:
-                redis_client.hdel(REDIS_GITHUB_CONFIGS_KEY, repo_full_name)
-                logger.info("GitHub config %s deleted from Redis.", repo_full_name)
-            except Exception as e:
-                logger.error("Failed to delete GitHub config %s from Redis: %s", repo_full_name, e)
+        try:
+            delete_config_from_postgres('github', repo_full_name)
+            logger.info("GitHub config %s deleted from PostgreSQL.", repo_full_name)
+        except Exception as e:
+            logger.error("Failed to delete GitHub config %s from PostgreSQL: %s", repo_full_name, e)
         return jsonify({"message": f"Configuration for GitHub repository {repo_full_name} deleted."}), 200
     return jsonify({"error": f"Configuration for GitHub repository {repo_full_name} not found."}), 404
 
@@ -77,12 +75,12 @@ def add_or_update_gitlab_project_config():
         config_data["instance_url"] = instance_url
 
     gitlab_project_configs[project_id_str] = config_data
-    if redis_client:
-        try:
-            redis_client.hset(REDIS_GITLAB_CONFIGS_KEY, project_id_str, json.dumps(config_data))
-            logger.info("GitLab config %s saved to Redis.", project_id_str)
-        except Exception as e:
-            logger.error("Failed to save GitLab config %s to Redis: %s", project_id_str, e)
+    try:
+        save_config_to_postgres('gitlab', project_id_str, config_data)
+        logger.info("GitLab config %s saved to PostgreSQL.", project_id_str)
+    except Exception as e:
+        logger.error("Failed to save GitLab config %s to PostgreSQL: %s", project_id_str, e)
+        return jsonify({"error": f"Failed to save configuration: {str(e)}"}), 500
 
     return jsonify({"message": f"Configuration for GitLab project {project_id_str} added/updated."}), 200
 
@@ -93,12 +91,11 @@ def delete_gitlab_project_config(project_id):
     project_id_str = str(project_id)
     if project_id_str in gitlab_project_configs:
         del gitlab_project_configs[project_id_str]
-        if redis_client:
-            try:
-                redis_client.hdel(REDIS_GITLAB_CONFIGS_KEY, project_id_str)
-                logger.info("GitLab config %s deleted from Redis.", project_id_str)
-            except Exception as e:
-                logger.error("Failed to delete GitLab config %s from Redis: %s", project_id_str, e)
+        try:
+            delete_config_from_postgres('gitlab', project_id_str)
+            logger.info("GitLab config %s deleted from PostgreSQL.", project_id_str)
+        except Exception as e:
+            logger.error("Failed to delete GitLab config %s from PostgreSQL: %s", project_id_str, e)
         return jsonify({"message": f"Configuration for GitLab project {project_id_str} deleted."}), 200
     return jsonify({"error": f"Configuration for GitLab project {project_id_str} not found."}), 404
 

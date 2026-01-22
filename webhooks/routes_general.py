@@ -2,7 +2,7 @@ import json
 import logging
 
 from config.core_config import app_configs
-from config.redis_config import mark_commit_as_processed
+from config.postgres_config import mark_commit_as_processed
 from webhooks.push_process import get_final_summary_comment_text
 from webhooks.helpers import _save_review_results_and_log
 from services.llm_review_general_service import get_openai_code_review_general

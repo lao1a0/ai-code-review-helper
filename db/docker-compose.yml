@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: aihelper
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: aihelper
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
