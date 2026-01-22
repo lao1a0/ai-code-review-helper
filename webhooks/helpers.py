@@ -2,6 +2,8 @@ import logging
 import datetime
 from typing import Optional
 
+from flask import Flask
+
 from config.postgres_config import save_review_results
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,13 @@ def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, 
     except Exception as e:
         # save_review_results 内部已经有错误日志，这里可以捕获更通用的错误或决定是否需要额外日志
         logger.error(f"调用 save_review_results 时发生意外错误 ({vcs_type} {identifier}#{pr_mr_id}, Commit: {commit_sha}): {e}")
+
+def run_with_app_context(app: Optional[Flask], func, *args, **kwargs):
+    """Run a callable inside a Flask app context for background threads."""
+    if app is None:
+        return func(*args, **kwargs)
+    with app.app_context():
+        return func(*args, **kwargs)
 
 def handle_async_task_exception(future, logger_app_factory=None):
     """

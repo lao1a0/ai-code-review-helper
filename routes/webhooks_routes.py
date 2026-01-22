@@ -1,7 +1,7 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Blueprint, abort, jsonify, request
+from flask import Blueprint, abort, current_app, jsonify, request
 
 from config.postgres_config import (
     gitlab_project_configs,
@@ -14,7 +14,7 @@ from services.vcs_service import get_gitlab_mr_changes
 from utils.agent_commands import agent_help_text, parse_agent_command
 from utils.auth import require_admin_key, verify_github_signature, verify_gitlab_signature
 from webhooks import push_process, routes_detailed, routes_general
-from webhooks.helpers import handle_async_task_exception
+from webhooks.helpers import handle_async_task_exception, run_with_app_context
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,10 @@ def gitlab_webhook():
     if head_sha_payload and is_commit_processed("gitlab", project_id_str, str(mr_iid), head_sha_payload):
         return "提交已处理", 200
 
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         routes_detailed._process_gitlab_detailed_payload,
         access_token=access_token,
         project_id_str=project_id_str,
@@ -175,7 +178,10 @@ def github_webhook():
     if head_sha and is_commit_processed("github", repo_full_name, str(pull_number), head_sha):
         return "提交已处理", 200
 
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         routes_detailed._process_github_detailed_payload,
         access_token=access_token,
         owner=owner,
@@ -262,7 +268,10 @@ def gitlab_webhook_general():
         return "无法确定提交SHA", 500
 
     current_commit_sha_for_ops = final_position_info.get("head_commit_sha", head_sha_payload)
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         routes_general._process_gitlab_general_payload,
         access_token=access_token,
         project_id_str=project_id_str,
@@ -339,7 +348,10 @@ def github_webhook_general():
     if head_sha and is_commit_processed("github_general", repo_full_name, str(pull_number), head_sha):
         return "提交已处理", 200
 
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         routes_general._process_github_general_payload,
         access_token=access_token,
         owner=owner,
@@ -405,7 +417,10 @@ def github_push_webhook():
     if is_commit_processed("github_push", repo_full_name, audit_id, after_sha):
         return jsonify({"message": "Already processed."}), 200
 
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         push_process._process_github_push_payload,
         access_token=access_token,
         owner=owner,
@@ -469,7 +484,10 @@ def gitlab_push_webhook():
     if is_commit_processed("gitlab_push", project_id_str, audit_id, after_sha):
         return jsonify({"message": "Already processed."}), 200
 
+    app = current_app._get_current_object()
     future = executor.submit(
+        run_with_app_context,
+        app,
         push_process._process_gitlab_push_payload,
         access_token=access_token,
         project_id_str=project_id_str,

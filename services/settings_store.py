@@ -3,6 +3,10 @@ from typing import Any, Dict
 
 # Settings store - now using memory only (previously used Redis)
 
+# 全局内存存储
+_MEM_AGENT_SETTINGS = {}
+_MEM_PROJECT_SETTINGS = {}
+
 
 def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(base or {})
