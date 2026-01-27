@@ -1,0 +1,38 @@
+# XSS (Cross-Site Scripting) Detection Rules
+
+patterns:
+  - pattern: "innerHTML.*=.*"
+    description: "Direct assignment to innerHTML"
+    severity: "high"
+    suggestion: "Use textContent or sanitize HTML before assignment"
+  
+  - pattern: "document\\.write\\("
+    description: "Direct document.write() usage"
+    severity: "high"
+    suggestion: "Use DOM manipulation methods or sanitize content"
+  
+  - pattern: "\\.html\\(.*\\)"
+    description: "jQuery html() method with user input"
+    severity: "high"
+    suggestion: "Use text() method or sanitize HTML content"
+  
+  - pattern: "eval\\("
+    description: "Usage of eval() function"
+    severity: "critical"
+    suggestion: "Avoid eval() completely, use safer alternatives"
+
+safe_practices:
+  - "Always sanitize user input before rendering"
+  - "Use textContent instead of innerHTML when possible"
+  - "Implement Content Security Policy (CSP) headers"
+  - "Use template engines with automatic escaping"
+  - "Validate input on both client and server side"
+  - "Use HTTP-only cookies for sensitive data"
+
+examples:
+  - bad: element.innerHTML = userInput
+  - good: element.textContent = userInput
+  - bad: $('#content').html(userData)
+  - good: $('#content').text(userData)
+  - bad: eval(userCode)
+  - good: JSON.parse(userData)
