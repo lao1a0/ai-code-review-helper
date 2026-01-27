@@ -13,7 +13,7 @@ from config.settings import get_config, SERVER_CONFIG
 from core.models import db, login_manager
 
 # Import API blueprints
-from api import auth_bp, console_bp, webhooks_bp
+from api import auth_bp, console_bp, projects_bp, webhooks_bp
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +42,7 @@ def create_app():
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(console_bp)
+    app.register_blueprint(projects_bp)
     app.register_blueprint(webhooks_bp)
     
     # Routes
