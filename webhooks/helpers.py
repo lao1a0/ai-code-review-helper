@@ -9,7 +9,7 @@ from config.postgres_config import save_review_results
 logger = logging.getLogger(__name__)
 
 
-def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name_for_gitlab: Optional[str] = None, branch: Optional[str] = None):
+def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name_for_gitlab: Optional[str] = None, branch: Optional[str] = None, project_url: Optional[str] = None):
     """统一保存审查结果到数据库（并补齐 created_at 元信息）。"""
     if not commit_sha:
         logger.warning(f"警告: {vcs_type.capitalize()} {identifier}#{pr_mr_id} 的 commit_sha 为空。无法保存审查结果。")
@@ -21,9 +21,9 @@ def _save_review_results_and_log(vcs_type: str, identifier: str, pr_mr_id: str, 
     try:
         # 统一处理所有 github* 和 gitlab* 类型
         if vcs_type.startswith('github'): # 包括 'github' 和 'github_general'
-            save_review_results(vcs_type, identifier, pr_mr_id, commit_sha, review_json_string, branch=branch, created_at=created_at)
+            save_review_results(vcs_type, identifier, pr_mr_id, commit_sha, review_json_string, branch=branch, created_at=created_at, project_url=project_url)
         elif vcs_type.startswith('gitlab'): # 包括 'gitlab' 和 'gitlab_general'
-            save_review_results(vcs_type, identifier, pr_mr_id, commit_sha, review_json_string, project_name=project_name_for_gitlab, branch=branch, created_at=created_at)
+            save_review_results(vcs_type, identifier, pr_mr_id, commit_sha, review_json_string, project_name=project_name_for_gitlab, branch=branch, created_at=created_at, project_url=project_url)
         else:
             logger.error(f"未知的 VCS 类型 '{vcs_type}'，无法保存审查结果。")
             return

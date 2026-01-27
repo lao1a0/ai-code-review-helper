@@ -73,7 +73,8 @@ def load_app_configs_from_env():
             # Push 审计（Git push hook）配置
             "PUSH_AUDIT_ENABLED": (env_values.get("PUSH_AUDIT_ENABLED", "true") or "true").lower() == "true",
             "PUSH_AUDIT_MAX_FILES": int(env_values.get("PUSH_AUDIT_MAX_FILES", "20") or "20"),
-            "PUSH_AUDIT_POST_COMMIT_COMMENT": (env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT", "true") or "true").lower() == "true",
+            "PUSH_AUDIT_POST_COMMIT_COMMENT": (env_values.get("PUSH_AUDIT_POST_COMMIT_COMMENT",
+                                                              "true") or "true").lower() == "true",
 
             # --- LLM + RAG + Skill policies (used by the console; stored in app_configs so /config/global_settings can manage them) ---
             "LLM_TEMPERATURE": float(env_values.get("LLM_TEMPERATURE", "0.2") or "0.2"),
@@ -88,8 +89,7 @@ def load_app_configs_from_env():
             "RAG_HYBRID_WEIGHT": float(env_values.get("RAG_HYBRID_WEIGHT", "0.7") or "0.7"),
 
             # --- Notification template (placeholder) ---
-            "NOTIFY_TEMPLATE": env_values.get("NOTIFY_TEMPLATE", ""),
-            }
+            "NOTIFY_TEMPLATE": env_values.get("NOTIFY_TEMPLATE", ""), }
 
 
 # Load .env into os.environ before reading module-level settings like ADMIN_API_KEY.
@@ -109,5 +109,4 @@ ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "change_this_unified_secret_key"
 APP_KEY_PREFIX = "aihelper"
 
 # --- 应用可配置项 (内存字典，从 .env 文件加载，可被 API 修改) ---
-app_configs = load_app_configs_from_env()
-# --- ---
+app_configs = load_app_configs_from_env()  # --- ---

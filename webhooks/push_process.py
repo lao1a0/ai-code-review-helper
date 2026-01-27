@@ -153,7 +153,7 @@ def _process_github_push_payload(access_token: str, owner: str, repo_name: str, 
     _save_review_results_and_log(vcs_type="github_push", identifier=repo_full_name, pr_mr_id=audit_id,
                                  commit_sha=after_sha,
                                  review_json_string=json.dumps(all_reviews, ensure_ascii=False, indent=2),
-                                 branch=ref.split('/')[-1])
+                                 branch=ref.split('/')[-1], project_url=repo_web_url)
     mark_commit_as_processed("github_push", repo_full_name, audit_id, after_sha)
 
     summary = _build_push_audit_summary_markdown(vcs_label="GitHub", repo_or_project_display=repo_full_name, ref=ref,
@@ -204,7 +204,7 @@ def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: st
     _save_review_results_and_log(vcs_type="gitlab_push", identifier=str(project_id_str), pr_mr_id=audit_id,
                                  commit_sha=after_sha,
                                  review_json_string=json.dumps(all_reviews, ensure_ascii=False, indent=2),
-                                 project_name_for_gitlab=project_name or str(project_id_str), branch=ref.split('/')[-1])
+                                 project_name_for_gitlab=project_name or str(project_id_str), branch=ref.split('/')[-1], project_url=project_web_url)
     mark_commit_as_processed("gitlab_push", str(project_id_str), audit_id, after_sha)
 
     display_name = project_name or str(project_id_str)

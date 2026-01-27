@@ -32,7 +32,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
         logger.info("GitHub (通用审查): 未检测到文件变更或数据。无需审查。")
         _save_review_results_and_log(  # 保存空列表表示已处理且无内容
             vcs_type='github_general', identifier=repo_full_name, pr_mr_id=str(pull_number), commit_sha=head_sha,
-            review_json_string=json.dumps([]), branch=pr_source_branch)
+            review_json_string=json.dumps([]), branch=pr_source_branch, project_url=repo_web_url)
         return
 
     aggregated_general_reviews_for_storage = []
@@ -86,7 +86,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
         review_json_string_for_storage = json.dumps(aggregated_general_reviews_for_storage)
         _save_review_results_and_log(vcs_type='github_general', identifier=repo_full_name, pr_mr_id=str(pull_number),
                                      commit_sha=head_sha, review_json_string=review_json_string_for_storage,
-                                     branch=pr_source_branch)
+                                     branch=pr_source_branch, project_url=repo_web_url)
     else:
         logger.info("GitHub (通用审查): 所有被检查的文件均未发现问题。")
         no_issues_text = f"AI General Code Review 已完成，对 {len(file_data_list)} 个文件的检查均未发现主要问题或无审查建议。"
@@ -140,7 +140,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
         _save_review_results_and_log(  # 保存空列表表示已处理且无内容
             vcs_type='gitlab_general', identifier=project_id_str, pr_mr_id=str(mr_iid),
             commit_sha=current_commit_sha_for_ops, review_json_string=json.dumps([]),
-            project_name_for_gitlab=project_name_from_payload, branch=mr_attrs.get('source_branch'))
+            project_name_for_gitlab=project_name_from_payload, branch=mr_attrs.get('source_branch'), project_url=project_web_url)
         return
 
     aggregated_general_reviews_for_storage = []
@@ -196,7 +196,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
                                      commit_sha=current_commit_sha_for_ops,
                                      review_json_string=review_json_string_for_storage,
                                      project_name_for_gitlab=project_name_from_payload,
-                                     branch=mr_attrs.get('source_branch'))
+                                     branch=mr_attrs.get('source_branch'), project_url=project_web_url)
     else:
         logger.info("GitLab (通用审查): 所有被检查的文件均未发现问题。")
         no_issues_text = f"AI General Code Review 已完成，对 {len(file_data_list)} 个文件的检查均未发现主要问题或无审查建议。"
@@ -205,7 +205,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
                                      commit_sha=current_commit_sha_for_ops, review_json_string=json.dumps([]),
                                      # Save empty list
                                      project_name_for_gitlab=project_name_from_payload,
-                                     branch=mr_attrs.get('source_branch'))
+                                     branch=mr_attrs.get('source_branch'), project_url=project_web_url)
 
     if app_configs.get("WECOM_BOT_WEBHOOK_URL"):
         logger.info("GitLab (通用审查): 正在发送摘要通知到企业微信机器人...")

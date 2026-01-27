@@ -1,15 +1,189 @@
 import json
 import logging
+import os
 from datetime import datetime, timedelta
+from typing import Optional, Tuple
 
 from config.core_config import app_configs
-from db.models import db, ProcessedCommit, ReviewResult, Config
+from db.models import db, ProcessedCommit, ReviewResult, Config, User, GitLabProject, GitHubProject, GitLabReview, GitHubReview
 
 logger = logging.getLogger(__name__)
 
 # 内存中的配置缓存
 github_repo_configs = {}
 gitlab_project_configs = {}
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _ensure_system_user() -> Optional[User]:
+    username = os.environ.get("DEFAULT_ADMIN_USERNAME")
+    user = User.query.filter_by(username=username).first()
+    if user:
+        return user
+    user = User.query.first()
+    if user:
+        return user
+    password = os.environ.get("DEFAULT_ADMIN_PASSWORD")
+    user = User()
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    logger.info("Created default admin user for webhook data.")
+    return user
+
+
+def _github_owner_repo(repo_full_name: str) -> Optional[Tuple[str, str]]:
+    if not repo_full_name or "/" not in repo_full_name:
+        return None
+    owner, repo = repo_full_name.split("/", 1)
+    if not owner or not repo:
+        return None
+    return owner, repo
+
+
+def _default_gitlab_url(project_id: str, instance_url: Optional[str]) -> str:
+    base = (instance_url or app_configs.get("GITLAB_INSTANCE_URL") or "https://gitlab.com").rstrip("/")
+    return f"{base}/{project_id}"
+
+
+def _upsert_github_project(user: User, repo_full_name: str, config_data: Optional[dict],
+                           project_url: Optional[str] = None) -> Optional[GitHubProject]:
+    parsed = _github_owner_repo(repo_full_name)
+    if not parsed:
+        return None
+    owner, repo = parsed
+    token = (config_data or {}).get("token") or ""
+    if not token:
+        return None
+    secret = (config_data or {}).get("secret")
+    project = GitHubProject.query.filter_by(user_id=user.id, owner=owner, repo=repo).first()
+    if project:
+        project.token = token
+        project.secret = secret
+        return project
+    project = GitHubProject(user_id=user.id, token=token, secret=secret, owner=owner, repo=repo)
+    db.session.add(project)
+    db.session.flush()
+    return project
+
+
+def _upsert_gitlab_project(user: User, project_id: str, config_data: Optional[dict],
+                           project_url: Optional[str] = None) -> Optional[GitLabProject]:
+    token = (config_data or {}).get("token") or ""
+    if not token:
+        return None
+    secret = (config_data or {}).get("secret")
+    instance_url = (config_data or {}).get("instance_url")
+    url = project_url or _default_gitlab_url(project_id, instance_url)
+    project = GitLabProject.query.filter_by(user_id=user.id, project_id=project_id).first()
+    if project:
+        project.token = token
+        project.secret = secret
+        if project_url:
+            project.url = project_url
+        return project
+    project = GitLabProject(user_id=user.id, token=token, secret=secret, project_id=project_id, url=url)
+    db.session.add(project)
+    db.session.flush()
+    return project
+
+
+def _sync_project_config_to_db(config_type: str, key: str, config_data: dict) -> None:
+    user = _ensure_system_user()
+    if not user:
+        return
+    try:
+        if config_type == "github":
+            _upsert_github_project(user, key, config_data)
+        elif config_type == "gitlab":
+            _upsert_gitlab_project(user, str(key), config_data)
+        else:
+            return
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to sync {config_type} project config to project tables: {e}")
+
+
+def _sync_review_to_project_tables(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str,
+                                   review_json_string: str, project_name: Optional[str] = None,
+                                   branch: Optional[str] = None, created_at: Optional[str] = None,
+                                   project_url: Optional[str] = None) -> None:
+    base = (vcs_type or "").split("_", 1)[0].lower()
+    if base not in {"github", "gitlab"}:
+        return
+    user = _ensure_system_user()
+    if not user:
+        return
+    try:
+        project = None
+        if base == "github":
+            config_data = github_repo_configs.get(identifier) or {}
+            project = _upsert_github_project(user, identifier, config_data, project_url=project_url)
+        else:
+            config_data = gitlab_project_configs.get(str(identifier)) or {}
+            project = _upsert_gitlab_project(user, str(identifier), config_data, project_url=project_url)
+        if not project:
+            return
+
+        review_time = _parse_iso_datetime(created_at) or datetime.utcnow()
+        ai_name = app_configs.get("OPENAI_MODEL", "ai")
+
+        if base == "github":
+            existing = GitHubReview.query.filter_by(
+                project_id=project.id,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha,
+            ).first()
+            if existing:
+                existing.review_content = review_json_string
+                existing.branch = branch
+                existing.date = review_time
+            else:
+                db.session.add(GitHubReview(
+                    project_id=project.id,
+                    ai_name=ai_name,
+                    review_content=review_json_string,
+                    quality_score=None,
+                    commit_sha=commit_sha,
+                    pr_mr_id=str(pr_mr_id),
+                    branch=branch,
+                    date=review_time,
+                ))
+        else:
+            existing = GitLabReview.query.filter_by(
+                project_id=project.id,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha,
+            ).first()
+            if existing:
+                existing.review_content = review_json_string
+                existing.branch = branch
+                existing.date = review_time
+            else:
+                db.session.add(GitLabReview(
+                    project_id=project.id,
+                    ai_name=ai_name,
+                    review_content=review_json_string,
+                    quality_score=None,
+                    commit_sha=commit_sha,
+                    pr_mr_id=str(pr_mr_id),
+                    branch=branch,
+                    date=review_time,
+                ))
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to sync review results into project/review tables: {e}")
 
 def init_postgres_config():
     """初始化PostgreSQL配置存储。确保数据库表存在。"""
@@ -70,6 +244,8 @@ def save_config_to_postgres(config_type: str, key: str, config_data: dict):
             github_repo_configs[key] = config_data
         elif config_type == 'gitlab':
             gitlab_project_configs[key] = config_data
+
+        _sync_project_config_to_db(config_type, key, config_data)
 
         logger.info(f"成功保存{config_type}配置: {key}")
     except Exception as e:
@@ -170,7 +346,7 @@ def remove_processed_commit_entries_for_pr_mr(vcs_type: str, identifier: str, pr
         db.session.rollback()
         logger.error(f"为{vcs_type} {identifier} #{pr_mr_id}移除已处理的commit条目时发生意外错误: {e}")
 
-def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name: str = None, branch: str = None, created_at: str = None):
+def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name: str = None, branch: str = None, created_at: str = None, project_url: str = None):
     """将AI审查结果保存到PostgreSQL。"""
     if not commit_sha:
         logger.warning(f"警告: commit_sha为空，针对{vcs_type}:{identifier}:{pr_mr_id}。跳过保存审查结果。")
@@ -203,6 +379,10 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
             db.session.add(review_result)
 
         db.session.commit()
+
+        _sync_review_to_project_tables(vcs_type, identifier, pr_mr_id, commit_sha, review_json_string,
+                                       project_name=project_name, branch=branch, created_at=created_at,
+                                       project_url=project_url)
 
         log_msg = f"成功将{vcs_type} {identifier} #{pr_mr_id} (commit: {commit_sha})的审查结果保存到PostgreSQL。"
         if project_name:
