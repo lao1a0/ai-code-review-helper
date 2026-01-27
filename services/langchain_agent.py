@@ -1,28 +1,14 @@
-import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
-from config.postgres_config import github_repo_configs, gitlab_project_configs, save_config_to_postgres, delete_config_from_postgres
+from config.postgres_config import github_repo_configs, gitlab_project_configs, save_config_to_postgres, \
+    delete_config_from_postgres
 from services.langchain_factory import get_chat_model
 
 logger = logging.getLogger(__name__)
-
-
-def _save_to_postgres(config_type: str, key: str, value: Dict[str, Any]) -> None:
-    try:
-        save_config_to_postgres(config_type, key, value)
-    except Exception:
-        logger.exception("Failed to save config to PostgreSQL.")
-
-
-def _delete_from_postgres(config_type: str, key: str) -> None:
-    try:
-        delete_config_from_postgres(config_type, key)
-    except Exception:
-        logger.exception("Failed to delete config from PostgreSQL.")
 
 
 def build_agent():
@@ -37,7 +23,8 @@ def build_agent():
     @tool
     def gitlab_list() -> str:
         """List configured GitLab projects."""
-        projects = sorted(list((gitlab_project_configs or {}).keys()), key=lambda x: int(x) if str(x).isdigit() else str(x))
+        projects = sorted(list((gitlab_project_configs or {}).keys()),
+                          key=lambda x: int(x) if str(x).isdigit() else str(x))
         if not projects:
             return "当前没有配置任何 GitLab 项目。"
         return "已配置的 GitLab 项目：\n- " + "\n- ".join(projects)
@@ -54,7 +41,7 @@ def build_agent():
             return "secret/token 不能为空。"
         conf = {"secret": secret, "token": token}
         github_repo_configs[repo_full_name] = conf
-        _save_to_postgres('github', repo_full_name, conf)
+        save_config_to_postgres('github', repo_full_name, conf)
         return f"已添加/更新 GitHub 仓库：{repo_full_name}"
 
     @tool
@@ -64,7 +51,7 @@ def build_agent():
         if repo_full_name not in (github_repo_configs or {}):
             return f"未找到 GitHub 仓库配置：{repo_full_name}"
         del github_repo_configs[repo_full_name]
-        _delete_from_postgres('github', repo_full_name)
+        delete_config_from_postgres('github', repo_full_name)
         return f"已删除 GitHub 仓库配置：{repo_full_name}"
 
     @tool
@@ -81,7 +68,7 @@ def build_agent():
         if instance_url:
             conf["instance_url"] = str(instance_url).strip()
         gitlab_project_configs[project_id] = conf
-        _save_to_postgres('gitlab', project_id, conf)
+        save_config_to_postgres('gitlab', project_id, conf)
         return f"已添加/更新 GitLab 项目：{project_id}"
 
     @tool
@@ -91,7 +78,7 @@ def build_agent():
         if project_id not in (gitlab_project_configs or {}):
             return f"未找到 GitLab 项目配置：{project_id}"
         del gitlab_project_configs[project_id]
-        _delete_from_postgres('gitlab', project_id)
+        delete_config_from_postgres('gitlab', project_id)
         return f"已删除 GitLab 项目配置：{project_id}"
 
     system = ("你是一个用于配置本系统 GitHub/GitLab 的运维助手。\n"
@@ -102,7 +89,6 @@ def build_agent():
     tools = [github_list, gitlab_list, github_add, github_delete, gitlab_add, gitlab_delete]
     llm = get_chat_model()
 
-    # 使用langgraph的create_react_agent替代旧的create_openai_tools_agent
     agent = create_agent(llm, tools, system_prompt=system)
 
     return agent
@@ -133,6 +119,7 @@ def run_langchain_agent(message: str) -> str:
     except Exception as e:
         logger.error(f"Agent execution error: {e}")
         return f"执行出错：{str(e)}"
+
 
 if __name__ == '__main__':
     run_langchain_agent()

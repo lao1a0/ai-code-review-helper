@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, render_template, request
 
 from config.core_config import app_configs
 from config.postgres_config import get_all_reviewed_prs_mrs_keys, get_review_results, gitlab_project_configs, github_repo_configs
+from db.models import User
 from services import app_log, rag_call_graph, rag_service, review_enrichment, settings_store, skill_registry
 from services.vcs_service import get_github_pr_changes, get_gitlab_mr_changes
 from utils.auth import require_admin_key
@@ -102,6 +103,13 @@ def api_projects_list():
         })
 
     return jsonify({"projects": projects}), 200
+
+
+@bp.route("/api/users", methods=["GET"])
+@require_admin_key
+def api_users_list():
+    users = User.query.order_by(User.created_at.desc()).all()
+    return jsonify({"users": [u.to_dict() for u in users]}), 200
 
 
 @bp.route("/api/projects/<path:project_key>/settings", methods=["GET"])

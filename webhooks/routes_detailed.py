@@ -1,7 +1,6 @@
 import json
 import logging
 from config.core_config import app_configs
-from config.postgres_config import mark_commit_as_processed
 from services.llm_review_detailed_service import get_openai_detailed_review_for_file, get_openai_code_review
 from webhooks.push_process import get_final_summary_comment_text
 from webhooks.helpers import _save_review_results_and_log
@@ -13,7 +12,7 @@ from services.vcs_service import (
     add_gitlab_mr_comment,
     add_gitlab_mr_general_comment,
     get_github_pr_changes,
-    get_gitlab_mr_changes,
+    get_gitlab_mr_changes
 )
 from utils.auth import verify_github_signature, verify_gitlab_signature
 logger = logging.getLogger(__name__)
@@ -56,7 +55,6 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
         logger.info("GitHub (详细审查): 解析后未检测到变更。无需审查。")
         _save_review_results_and_log(vcs_type='github', identifier=repo_full_name, pr_mr_id=str(pull_number),
                                      commit_sha=head_sha, review_json_string=json.dumps([]), branch=pr_source_branch, project_url=repo_web_url)
-        mark_commit_as_processed('github', repo_full_name, str(pull_number), head_sha)
         return
 
     all_reviews_for_storage = []
@@ -74,8 +72,8 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
             repo_full_name,
             file_path,
             file_data,
-            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5),
-        )
+            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5)
+)
         rag_for_llm = None
         if rag_payload.get("enabled") and rag_payload.get("context"):
             rag_for_llm = {
@@ -87,8 +85,8 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
             file_path,
             file_data,
             current_model,
-            rag=rag_for_llm,
-        )
+            rag=rag_for_llm
+)
 
         if reviews_for_file_list:  # reviews_for_file_list 是一个 Python 列表
             # Add RAG metadata for the console filters (safe extra keys).
@@ -153,12 +151,6 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
 """
         # send_to_wecom_bot(summary_content) # 旧调用 - 已被 send_notifications 替代
         send_notifications(summary_content)  # 新调用
-
-    if head_sha:
-        mark_commit_as_processed('github', repo_full_name, str(pull_number), head_sha)
-    else:
-        logger.warning(f"警告: GitHub (详细审查) PR {repo_full_name}#{pull_number} 的 head_sha 为空。无法标记为已处理。")
-
     final_comment_text = get_final_summary_comment_text()
     add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
 
@@ -185,7 +177,6 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
                                      commit_sha=head_sha_payload, review_json_string=json.dumps([]),
                                      project_name_for_gitlab=project_name_from_payload,
                                      branch=mr_attrs.get('source_branch'), project_url=project_web_url)
-        mark_commit_as_processed('gitlab', project_id_str, str(mr_iid), head_sha_payload)
         return
 
     logger.info(f'GitLab (详细审查): 正在发送变更给 {app_configs.get("OPENAI_MODEL", "gpt-4o")} 进行审查...')
@@ -199,8 +190,8 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
                 project_id_str,
                 fp,
                 fd,
-                top_k=int(app_configs.get("RAG_TOP_K", 5) or 5),
-            )
+                top_k=int(app_configs.get("RAG_TOP_K", 5) or 5)
+)
             if rag_payload.get("enabled") and rag_payload.get("context"):
                 rag_by_file[fp] = {
                     "sources": rag_payload.get("sources") or [],
@@ -277,13 +268,5 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
 """
         # send_to_wecom_bot(summary_content) # 旧调用
         send_notifications(summary_content)  # 新调用
-
-    if head_sha_payload:
-        mark_commit_as_processed('gitlab', project_id_str, str(mr_iid), head_sha_payload)
-    elif position_info and position_info.get("head_sha"):
-        logger.warning(
-            f"警告: GitLab (详细审查) head_sha_payload 为空，使用来自 position_info 的 head_sha 进行标记处理: {position_info.get('head_sha')}")
-        mark_commit_as_processed('gitlab', project_id_str, str(mr_iid), position_info.get("head_sha"))
-
     final_comment_text = get_final_summary_comment_text()
     add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)

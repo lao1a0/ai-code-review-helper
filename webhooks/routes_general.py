@@ -2,7 +2,6 @@ import json
 import logging
 
 from config.core_config import app_configs
-from config.postgres_config import mark_commit_as_processed
 from webhooks.push_process import get_final_summary_comment_text
 from webhooks.helpers import _save_review_results_and_log
 from services.llm_review_general_service import get_openai_code_review_general
@@ -12,7 +11,7 @@ from services.vcs_service import (
     add_github_pr_general_comment,
     add_gitlab_mr_general_comment,
     get_github_pr_data_for_general_review,
-    get_gitlab_mr_data_for_general_review,
+    get_gitlab_mr_data_for_general_review
 )
 
 logger = logging.getLogger(__name__)
@@ -50,8 +49,8 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
             repo_full_name,
             current_file_path,
             {"context": {"old": file_item.get("old_content"), "new": file_item.get("diff_text")}, "changes": []},
-            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5),
-        )
+            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5)
+)
         if rag_payload.get("enabled") and rag_payload.get("context"):
             file_item = dict(file_item)
             file_item["rag"] = {
@@ -115,10 +114,6 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
 """
         # send_to_wecom_bot(summary_content) # 旧调用
         send_notifications(summary_content)  # 新调用
-
-    if head_sha:
-        mark_commit_as_processed('github_general', repo_full_name, str(pull_number), head_sha)
-
     # 添加最终总结评论
     final_comment_text = get_final_summary_comment_text()
     add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
@@ -158,8 +153,8 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
             project_id_str,
             current_file_path,
             {"context": {"old": file_item.get("old_content"), "new": file_item.get("diff_text")}, "changes": []},
-            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5),
-        )
+            top_k=int(app_configs.get("RAG_TOP_K", 5) or 5)
+)
         if rag_payload.get("enabled") and rag_payload.get("context"):
             file_item = dict(file_item)
             file_item["rag"] = {
@@ -227,10 +222,6 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
 {summary_line}
 """
         send_notifications(summary_content)
-
-    if current_commit_sha_for_ops:
-        mark_commit_as_processed('gitlab_general', project_id_str, str(mr_iid), current_commit_sha_for_ops)
-
     # 添加最终总结评论
     final_comment_text = get_final_summary_comment_text()
     add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)

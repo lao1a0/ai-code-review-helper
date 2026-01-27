@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from config.core_config import app_configs
-from db.models import db, ProcessedCommit, ReviewResult, Config, User, GitLabProject, GitHubProject, GitLabReview, GitHubReview
+from db.models import db, ReviewResult, Config, User, GitLabProject, GitHubProject, GitLabReview, GitHubReview
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,14 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
 
 
 def _ensure_system_user() -> Optional[User]:
-    username = os.environ.get("DEFAULT_ADMIN_USERNAME")
+    username = (os.environ.get("DEFAULT_ADMIN_USERNAME") or "").strip() or "admin"
     user = User.query.filter_by(username=username).first()
     if user:
         return user
     user = User.query.first()
     if user:
         return user
-    password = os.environ.get("DEFAULT_ADMIN_PASSWORD")
+    password = (os.environ.get("DEFAULT_ADMIN_PASSWORD") or "").strip() or "admin123"
     user = User()
     user.set_password(password)
     db.session.add(user)
@@ -274,77 +274,6 @@ def delete_config_from_postgres(config_type: str, key: str):
         db.session.rollback()
         logger.error(f"删除{config_type}配置从PostgreSQL时出错: {e}")
         raise
-
-def is_commit_processed(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str) -> bool:
-    """检查指定的commit是否已经被处理过。"""
-    if not commit_sha:
-        logger.warning(f"警告: commit_sha为空，针对{vcs_type}:{identifier}:{pr_mr_id}。假定未处理。")
-        return False
-
-    try:
-        processed_commit = ProcessedCommit.query.filter_by(
-            vcs_type=vcs_type,
-            identifier=identifier,
-            pr_mr_id=str(pr_mr_id),
-            commit_sha=commit_sha
-        ).first()
-        return processed_commit is not None
-    except Exception as e:
-        logger.error(f"检查提交{vcs_type}:{identifier}:{pr_mr_id}:{commit_sha}是否已处理时PostgreSQL出错: {e}")
-        return False
-
-def mark_commit_as_processed(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str):
-    """将指定的commit标记为已处理。"""
-    if not commit_sha:
-        logger.warning(f"警告: commit_sha为空，针对{vcs_type}:{identifier}:{pr_mr_id}。跳过标记为已处理。")
-        return
-
-    try:
-        # 检查是否已存在
-        existing = ProcessedCommit.query.filter_by(
-            vcs_type=vcs_type,
-            identifier=identifier,
-            pr_mr_id=str(pr_mr_id),
-            commit_sha=commit_sha
-        ).first()
-
-        if not existing:
-            processed_commit = ProcessedCommit(
-                vcs_type=vcs_type,
-                identifier=identifier,
-                pr_mr_id=str(pr_mr_id),
-                commit_sha=commit_sha
-            )
-            db.session.add(processed_commit)
-            db.session.commit()
-            logger.info(f"成功标记提交{vcs_type}:{identifier}:{pr_mr_id}:{commit_sha}为已处理。")
-        else:
-            logger.debug(f"提交{vcs_type}:{identifier}:{pr_mr_id}:{commit_sha}已被标记为已处理。")
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"标记提交{vcs_type}:{identifier}:{pr_mr_id}:{commit_sha}为已处理时PostgreSQL出错: {e}")
-
-def remove_processed_commit_entries_for_pr_mr(vcs_type: str, identifier: str, pr_mr_id: str):
-    """当PR/MR关闭或合并时，移除其所有相关的已处理commit条目。"""
-    try:
-        deleted_count = ProcessedCommit.query.filter_by(
-            vcs_type=vcs_type,
-            identifier=identifier,
-            pr_mr_id=str(pr_mr_id)
-        ).delete()
-        db.session.commit()
-
-        if deleted_count > 0:
-            logger.info(f"为{vcs_type} {identifier} #{pr_mr_id} 从PostgreSQL中总共移除了{deleted_count}个已处理的commit条目。")
-        else:
-            logger.info(f"在PostgreSQL中未找到与{vcs_type} {identifier} #{pr_mr_id}相关的已处理commit条目。")
-
-        # 同时删除关联的审查结果
-        delete_review_results_for_pr_mr(vcs_type, identifier, pr_mr_id)
-
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"为{vcs_type} {identifier} #{pr_mr_id}移除已处理的commit条目时发生意外错误: {e}")
 
 def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name: str = None, branch: str = None, created_at: str = None, project_url: str = None):
     """将AI审查结果保存到PostgreSQL。"""

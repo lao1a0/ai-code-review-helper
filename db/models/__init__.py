@@ -8,8 +8,7 @@ login_manager = LoginManager()
 from db.models.user import User
 from db.models.project import GitLabProject, GitHubProject
 from db.models.review import GitLabReview, GitHubReview
-from db.models.processed_commit import ProcessedCommit
 from db.models.review_result import ReviewResult
 from db.models.config import Config
 
-__all__ = ['db', 'login_manager', 'User', 'GitLabProject', 'GitHubProject', 'GitLabReview', 'GitHubReview', 'ProcessedCommit', 'ReviewResult', 'Config']
+__all__ = ['db', 'login_manager', 'User', 'GitLabProject', 'GitHubProject', 'GitLabReview', 'GitHubReview', 'ReviewResult', 'Config']

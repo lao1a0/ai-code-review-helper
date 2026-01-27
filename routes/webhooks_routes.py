@@ -6,8 +6,6 @@ from flask import Blueprint, abort, current_app, jsonify, request
 from config.postgres_config import (
     gitlab_project_configs,
     github_repo_configs,
-    is_commit_processed,
-    remove_processed_commit_entries_for_pr_mr,
 )
 from services.langchain_agent import run_langchain_agent
 from services.vcs_service import get_gitlab_mr_changes
@@ -90,14 +88,10 @@ def gitlab_webhook():
     mr_state = mr_attrs.get("state")
     if mr_action in ["close", "merge"] or mr_state in ["closed", "merged"]:
         mr_iid_str = str(mr_iid)
-        remove_processed_commit_entries_for_pr_mr("gitlab", project_id_str, mr_iid_str)
         return f"MR {mr_iid_str} 已关闭/合并，记录已清理。", 200
 
     if mr_state not in ["opened", "reopened"] and mr_action != "update":
         return "MR 操作/状态已忽略 (非审查触发条件)", 200
-
-    if head_sha_payload and is_commit_processed("gitlab", project_id_str, str(mr_iid), head_sha_payload):
-        return "提交已处理", 200
 
     app = current_app._get_current_object()
     future = executor.submit(
@@ -156,7 +150,6 @@ def github_webhook():
 
     if action == "closed":
         pull_number_str = str(pr_data.get("number"))
-        remove_processed_commit_entries_for_pr_mr("github", repo_full_name, pull_number_str)
         return f"PR {pull_number_str} 已关闭，记录已清理。", 200
 
     if pr_state != "open" or action not in ["opened", "reopened", "synchronize"]:
@@ -174,9 +167,6 @@ def github_webhook():
 
     if not all([owner, repo_name, pull_number, head_sha]):
         abort(400, "GitHub 负载中缺少必要的 PR 信息")
-
-    if head_sha and is_commit_processed("github", repo_full_name, str(pull_number), head_sha):
-        return "提交已处理", 200
 
     app = current_app._get_current_object()
     future = executor.submit(
@@ -241,14 +231,10 @@ def gitlab_webhook_general():
     mr_state = mr_attrs.get("state")
     if mr_action in ["close", "merge"] or mr_state in ["closed", "merged"]:
         mr_iid_str = str(mr_iid)
-        remove_processed_commit_entries_for_pr_mr("gitlab_general", project_id_str, mr_iid_str)
         return f"MR {mr_iid_str} 已关闭/合并，通用审查相关记录已清理。", 200
 
     if mr_state not in ["opened", "reopened"] and mr_action != "update":
         return "MR 操作/状态已忽略", 200
-
-    if head_sha_payload and is_commit_processed("gitlab_general", project_id_str, str(mr_iid), head_sha_payload):
-        return "提交已处理", 200
 
     temp_position_info = {
         "base_commit_sha": mr_attrs.get("diff_base_sha") or mr_attrs.get("base_commit_sha"),
@@ -326,7 +312,6 @@ def github_webhook_general():
 
     if action == "closed":
         pull_number_str = str(pr_data.get("number"))
-        remove_processed_commit_entries_for_pr_mr("github_general", repo_full_name, pull_number_str)
         return f"PR {pull_number_str} 已关闭，通用审查相关记录已清理。", 200
 
     if pr_state != "open" or action not in ["opened", "reopened", "synchronize"]:
@@ -344,9 +329,6 @@ def github_webhook_general():
 
     if not all([owner, repo_name, pull_number, head_sha]):
         abort(400, "GitHub 负载中缺少必要的 PR 信息 (粗粒度)。")
-
-    if head_sha and is_commit_processed("github_general", repo_full_name, str(pull_number), head_sha):
-        return "提交已处理", 200
 
     app = current_app._get_current_object()
     future = executor.submit(
@@ -414,9 +396,6 @@ def github_push_webhook():
     if not owner or not repo_name or not ref or not after_sha:
         abort(400, "GitHub Push 负载缺少必要字段 (owner/name/ref/after)")
 
-    if is_commit_processed("github_push", repo_full_name, audit_id, after_sha):
-        return jsonify({"message": "Already processed."}), 200
-
     app = current_app._get_current_object()
     future = executor.submit(
         run_with_app_context,
@@ -480,9 +459,6 @@ def gitlab_push_webhook():
 
     if not ref or not after_sha:
         abort(400, "GitLab Push 负载缺少必要字段 (ref/after)")
-
-    if is_commit_processed("gitlab_push", project_id_str, audit_id, after_sha):
-        return jsonify({"message": "Already processed."}), 200
 
     app = current_app._get_current_object()
     future = executor.submit(
