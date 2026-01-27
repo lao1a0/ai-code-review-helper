@@ -1,6 +1,7 @@
 """
 Review service for code review operations
 """
+import json
 import logging
 from typing import Dict, Any, List, Optional
 from core.models import Review, Project, db
@@ -59,6 +60,34 @@ class ReviewService:
             
         except Exception as e:
             logger.error(f"General review failed: {e}")
+            self._mark_review_failed(review_id)
+            return False
+
+    def perform_review_for_files(self, review_id: str, files: List[Dict[str, Any]]) -> bool:
+        """Perform review for a list of files and store aggregated results."""
+        try:
+            review = Review.query.get(review_id)
+            if not review:
+                logger.error(f"Review not found: {review_id}")
+                return False
+
+            results = []
+            for file_data in files:
+                content = self.llm_service.get_general_review(file_data)
+                if content:
+                    results.append({
+                        'file': file_data.get('file_path', ''),
+                        'review': content
+                    })
+
+            review.review_content = json.dumps(results, ensure_ascii=False)
+            review.status = 'completed'
+            db.session.commit()
+
+            logger.info(f"Review completed for {review_id} with {len(results)} file(s)")
+            return True
+        except Exception as e:
+            logger.error(f"Review failed: {e}")
             self._mark_review_failed(review_id)
             return False
     

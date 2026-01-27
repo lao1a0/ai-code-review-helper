@@ -5,8 +5,7 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.messages import SystemMessage, HumanMessage
 from config.settings import LLM_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,8 @@ class LLMService:
             self._chat_model = ChatOpenAI(
                 model=LLM_CONFIG['OPENAI_MODEL'],
                 temperature=LLM_CONFIG['OPENAI_TEMPERATURE'],
-                api_key=LLM_CONFIG['OPENAI_API_KEY']
+                api_key=LLM_CONFIG['OPENAI_API_KEY'],
+                base_url=LLM_CONFIG['OPENAI_API_BASE_URL']
             )
             logger.info(f"LLM model initialized: {LLM_CONFIG['OPENAI_MODEL']}")
         except Exception as e:
@@ -51,14 +51,17 @@ class LLMService:
                 logger.error("Chat model not initialized")
                 return []
             
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", user_prompt)
+            response = self._chat_model.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
             ])
-            
-            chain = prompt | self._chat_model | JsonOutputParser()
-            result = chain.invoke({})
-            
+            content = response.content if hasattr(response, 'content') else str(response)
+            try:
+                result = json.loads(content)
+            except Exception:
+                logger.error("Detailed review returned non-JSON content")
+                return []
+
             logger.info(f"Detailed review completed for {file_data.get('file_meta', {}).get('path', 'unknown')}")
             return result if isinstance(result, list) else []
             
@@ -86,16 +89,13 @@ class LLMService:
                 logger.error("Chat model not initialized")
                 return ""
             
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", user_prompt)
+            response = self._chat_model.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
             ])
-            
-            chain = prompt | self._chat_model
-            result = chain.invoke({})
-            
+
             logger.info(f"General review completed for {file_data.get('file_path', 'unknown')}")
-            return str(result.content) if hasattr(result, 'content') else str(result)
+            return str(response.content) if hasattr(response, 'content') else str(response)
             
         except Exception as e:
             logger.error(f"Error during general review: {e}")
@@ -111,6 +111,12 @@ class LLMService:
         except Exception as e:
             logger.error(f"Failed to load prompts: {e}")
             return ""
+
+    def _escape_prompt(self, prompt: str) -> str:
+        """Escape braces to prevent template variable parsing."""
+        if not prompt:
+            return ""
+        return prompt.replace("{", "{{").replace("}", "}}")
 
 # Global instance
 _llm_service = None
