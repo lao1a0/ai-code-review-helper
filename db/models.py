@@ -11,7 +11,7 @@ class ReviewResult(db.Model):
     __tablename__ = "reviews"
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_type = db.Column("projectType", db.String(100), nullable=False)
+    project_type = db.Column("projecttype", db.String(100), nullable=False)
     project = db.Column(db.String(100), nullable=False)
     date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     review_content = db.Column(db.Text, nullable=False)

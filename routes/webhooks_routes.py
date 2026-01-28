@@ -1,20 +1,19 @@
 ﻿import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Blueprint, abort, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from config.core_config import app_configs
 from services.langchain_agent import run_langchain_agent
-from services.vcs_service import get_gitlab_mr_changes
 from utils.agent_commands import agent_help_text, parse_agent_command
 from utils.auth import require_admin_key, verify_github_signature, verify_gitlab_signature
-from webhooks import push_process, routes_detailed, routes_general
+from webhooks import push_process, routes_detailed
 from webhooks.helpers import handle_async_task_exception, run_with_app_context
-
-logger = logging.getLogger(__name__)
 
 bp = Blueprint("webhooks_app", __name__)
 executor = ThreadPoolExecutor(max_workers=20)
+
+logger = logging.getLogger(__name__)
 
 
 @bp.route("/api/agent/chat", methods=["POST"])
@@ -43,14 +42,7 @@ def agent_chat_api():
 
 @bp.route("/gitlab_webhook", methods=["POST"])
 def gitlab_webhook():
-    try:
-        data = request.get_json()
-        if data is None:
-            raise ValueError("请求体为空或非有效 JSON")
-    except Exception as e:
-        logger.error("解析 GitLab JSON 负载时出错: %s", e)
-        abort(400, "无效的 JSON 负载")
-
+    data = request.get_json()
     project_data = data.get("project", {})
     project_id = project_data.get("id")
     project_web_url = project_data.get("web_url")
@@ -63,17 +55,17 @@ def gitlab_webhook():
     head_sha_payload = last_commit.get("id")
 
     if not project_id or not mr_iid:
-        abort(400, "GitLab 负载中缺少 project_id 或 mr_iid")
+        logger.error("GitLab 负载中缺少 project_id 或 mr_iid")
 
     project_id_str = str(project_id)
     config = app_configs.get(project_id_str)
     if not config:
-        abort(404, f"未找到 GitLab 项目 {project_id_str} 的配置。请通过 /config/gitlab/project 端点进行配置。")
+        logger.error(f"未找到 GitLab 项目 {project_id_str} 的配置。请通过 /config/gitlab/project 端点进行配置。")
 
     webhook_secret = config.get("secret")
     access_token = config.get("token")
     if not verify_gitlab_signature(request, webhook_secret):
-        abort(401, "GitLab signature verification failed.")
+        logger.error("GitLab signature verification failed.")
 
     event_type = request.headers.get("X-Gitlab-Event")
     if event_type == "Push Hook":
@@ -91,48 +83,29 @@ def gitlab_webhook():
         return "MR 操作/状态已忽略 (非审查触发条件)", 200
 
     app = current_app._get_current_object()
-    future = executor.submit(
-        run_with_app_context,
-        app,
-        routes_detailed._process_gitlab_detailed_payload,
-        access_token=access_token,
-        project_id_str=project_id_str,
-        mr_iid=mr_iid,
-        head_sha_payload=head_sha_payload,
-        project_data=project_data,
-        mr_attrs=mr_attrs,
-        project_web_url=project_web_url,
-        mr_title=mr_title,
-        mr_url=mr_url,
-        project_name_from_payload=project_name_from_payload,
-    )
+    future = executor.submit(run_with_app_context, app, routes_detailed._process_gitlab_detailed_payload,
+                             access_token=access_token, project_id_str=project_id_str, mr_iid=mr_iid,
+                             head_sha_payload=head_sha_payload, project_data=project_data, mr_attrs=mr_attrs,
+                             project_web_url=project_web_url, mr_title=mr_title, mr_url=mr_url,
+                             project_name_from_payload=project_name_from_payload, )
     future.add_done_callback(lambda f: handle_async_task_exception(f, logger_app_factory=logger))
     return jsonify({"message": "GitLab Detailed Webhook processing task accepted."}), 202
 
 
 @bp.route("/github_webhook", methods=["POST"])
 def github_webhook():
-    try:
-        payload_data = request.get_json()
-        if payload_data is None:
-            raise ValueError("请求体为空或非有效 JSON")
-    except Exception as e:
-        logger.error("解析 GitHub JSON 负载时出错: %s", e)
-        abort(400, "无效的 JSON 负载")
-
+    payload_data = request.get_json()
+    if payload_data is None:
+        raise ValueError("请求体为空或非有效 JSON")
     repo_info = payload_data.get("repository", {})
     repo_full_name = repo_info.get("full_name")
     if not repo_full_name:
-        abort(400, "GitHub 负载中缺少 repository.full_name")
+        logger.error("GitHub 负载中缺少 repository.full_name")
 
-    config = app_configs.get(repo_full_name)
-    if not config:
-        abort(404, f"未找到 GitHub 仓库 {repo_full_name} 的配置。请通过 /config/github/repo 端点进行配置。")
-
-    webhook_secret = config.get("secret")
-    access_token = config.get("token")
+    webhook_secret = app_configs.get("GITHUB_WEBHOOK_SECRET")
+    access_token = app_configs.get("GITHUB_ACCESS_TOKEN")
     if not verify_github_signature(request, webhook_secret):
-        abort(401, "GitHub signature verification failed.")
+        logger.error("GitHub signature verification failed.")
 
     event_type = request.headers.get("X-GitHub-Event")
     if event_type == "push":
@@ -162,37 +135,21 @@ def github_webhook():
     pr_target_branch = pr_data.get("base", {}).get("ref")
 
     if not all([owner, repo_name, pull_number, head_sha]):
-        abort(400, "GitHub 负载中缺少必要的 PR 信息")
+        logger.error("GitHub 负载中缺少必要的 PR 信息")
 
     app = current_app._get_current_object()
-    future = executor.submit(
-        run_with_app_context,
-        app,
-        routes_detailed._process_github_detailed_payload,
-        access_token=access_token,
-        owner=owner,
-        repo_name=repo_name,
-        pull_number=pull_number,
-        head_sha=head_sha,
-        repo_full_name=repo_full_name,
-        pr_title=pr_title,
-        pr_html_url=pr_html_url,
-        repo_web_url=repo_web_url,
-        pr_source_branch=pr_source_branch,
-        pr_target_branch=pr_target_branch,
-    )
+    future = executor.submit(run_with_app_context, app, routes_detailed._process_github_detailed_payload,
+                             access_token=access_token, owner=owner, repo_name=repo_name, pull_number=pull_number,
+                             head_sha=head_sha, repo_full_name=repo_full_name, pr_title=pr_title,
+                             pr_html_url=pr_html_url, repo_web_url=repo_web_url, pr_source_branch=pr_source_branch,
+                             pr_target_branch=pr_target_branch, )
     future.add_done_callback(lambda f: handle_async_task_exception(f, logger_app_factory=logger))
     return jsonify({"message": "GitHub Detailed Webhook processing task accepted."}), 202
 
-def _handle_push_webhook(platform_config, platform_name, data_getter_func, validation_func=None):
-    try:
-        data = request.get_json()
-        if data is None:
-            raise ValueError("请求体为空或非有效 JSON")
-    except Exception as e:
-        logger.error("解析 %s JSON 负载时出错: %s", platform_name.title(), e)
-        abort(400, "无效的 JSON 负载")
 
+def _handle_push_webhook(platform_name):
+    data = request.get_json()
+    identifier = data.get("repository", {}).get("full_name")
     if platform_name == "github":
         event_type = request.headers.get("X-GitHub-Event")
         if event_type != "push":
@@ -202,29 +159,25 @@ def _handle_push_webhook(platform_config, platform_name, data_getter_func, valid
         if event_type != "Push Hook":
             return "ignored", 200
 
-    identifier, config = data_getter_func(data, platform_config)
+    config = app_configs
     if not config:
         if platform_name == "gitlab":
-            abort(404, f"未找到 {platform_name.title()} 项目 {identifier} 的配置")
+            logger.error(f"未找到 {platform_name.title()} 项目 {identifier} 的配置")
         else:
-            abort(404, f"未找到 {platform_name.title()} 仓库 {identifier} 的配置")
-
-    if validation_func and not validation_func(request, config):
-        abort(401, f"{platform_name.title()} signature verification failed.")
+            logger.error(f"未找到 {platform_name.title()} 仓库 {identifier} 的配置")
 
     if data.get("deleted") or data.get("after") == "0" * 40:
         return jsonify({"message": "Branch deleted. Skipped."}), 200
 
-    ref = data.get("ref") or ""
-    before_sha = data.get("before") or ""
-    after_sha = data.get("after") or ""
+    ref = data.get("ref")
+    before_sha = data.get("before")
+    after_sha = data.get("after")
     created = bool(data.get("created", False) if platform_name == "github" else data.get("before") == "0" * 40)
     audit_id = push_process._make_push_audit_id(ref, after_sha)
 
     if platform_name == "github":
         owner = (data.get("repository", {}).get("owner") or {}).get("name") or (
-            data.get("repository", {}).get("owner") or {}
-        ).get("login")
+                data.get("repository", {}).get("owner") or {}).get("login")
         repo_name = data.get("repository", {}).get("name")
         repo_full_name = data.get("repository", {}).get("full_name")
         default_branch = data.get("repository", {}).get("default_branch")
@@ -236,21 +189,10 @@ def _handle_push_webhook(platform_config, platform_name, data_getter_func, valid
             return jsonify({"message": "GitHub Push 负载缺少必要字段 (owner/name/ref/after)。"}), 400
 
         return _execute_push_task(
-            {
-                "access_token": access_token,
-                "owner": owner,
-                "repo_name": repo_name,
-                "repo_full_name": repo_full_name,
-                "ref": ref,
-                "audit_id": audit_id,
-                "before_sha": before_sha,
-                "after_sha": after_sha,
-                "created": created,
-                "default_branch": default_branch,
-                "repo_web_url": repo_web_url,
-            },
-            push_process._process_github_push_payload,
-        )
+            {"access_token": access_token, "owner": owner, "repo_name": repo_name, "repo_full_name": repo_full_name,
+             "ref": ref, "audit_id": audit_id, "before_sha": before_sha, "after_sha": after_sha, "created": created,
+             "default_branch": default_branch, "repo_web_url": repo_web_url, },
+            push_process._process_github_push_payload, )
 
     project_id_str = identifier
     default_branch = (data.get("project") or {}).get("default_branch")
@@ -259,23 +201,13 @@ def _handle_push_webhook(platform_config, platform_name, data_getter_func, valid
     access_token = config.get("token")
 
     if not ref or not after_sha:
-        abort(400, "GitLab Push 负载缺少必要字段 (ref/after)")
+        logger.error("GitLab Push 负载缺少必要字段 (ref/after)")
 
     return _execute_push_task(
-        {
-            "access_token": access_token,
-            "project_id_str": project_id_str,
-            "ref": ref,
-            "audit_id": audit_id,
-            "before_sha": before_sha,
-            "after_sha": after_sha,
-            "project_name": project_name,
-            "project_web_url": project_web_url,
-            "created": created,
-            "default_branch": default_branch,
-        },
-        push_process._process_gitlab_push_payload,
-    )
+        {"access_token": access_token, "project_id_str": project_id_str, "ref": ref, "audit_id": audit_id,
+         "before_sha": before_sha, "after_sha": after_sha, "project_name": project_name,
+         "project_web_url": project_web_url, "created": created, "default_branch": default_branch, },
+        push_process._process_gitlab_push_payload, )
 
 
 def _execute_push_task(params, process_func):
@@ -288,34 +220,9 @@ def _execute_push_task(params, process_func):
 
 @bp.route("/github_push_webhook", methods=["POST"])
 def github_push_webhook():
-    def github_data_getter(data, platform_config):
-        repo_full_name = data.get("repository", {}).get("full_name")
-        if not repo_full_name:
-            abort(400, "GitHub 负载中缺少 repository.full_name")
-        config = platform_config.get(repo_full_name)
-        return repo_full_name, config
-
-    return _handle_push_webhook(
-        platform_config=app_configs,
-        platform_name="github",
-        data_getter_func=github_data_getter,
-        validation_func=lambda req, conf: verify_github_signature(req, conf.get("secret")),
-    )
+    return _handle_push_webhook(platform_name="github")
 
 
 @bp.route("/gitlab_push_webhook", methods=["POST"])
 def gitlab_push_webhook():
-    def gitlab_data_getter(data, platform_config):
-        project_id = data.get("project_id") or (data.get("project") or {}).get("id")
-        if not project_id:
-            abort(400, "GitLab 负载中缺少 project_id")
-        project_id_str = str(project_id)
-        config = platform_config.get(project_id_str)
-        return project_id_str, config
-
-    return _handle_push_webhook(
-        platform_config=app_configs,
-        platform_name="gitlab",
-        data_getter_func=gitlab_data_getter,
-        validation_func=lambda req, conf: verify_gitlab_signature(req, conf.get("secret")),
-    )
+    return _handle_push_webhook(platform_name="gitlab")

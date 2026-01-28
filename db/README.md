@@ -13,7 +13,7 @@ PostgreSQL数据库用于记录审计的结果的相关信息。
 | 字段名            | 类型 | 说明                  |
 |----------------|------|---------------------|
 | id             | UUID | 主键                  |
-| projectType    | VARCHAR(100) | 项目类型（Github/Gitlab） |
+| projecttype    | VARCHAR(100) | 项目类型（Github/Gitlab） |
 | project        | VARCHAR(100) | 项目的repo             |
 | date           | TIMESTAMP | 评审时间                |
 | review_content | TEXT | 评审内容                |

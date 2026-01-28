@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS reviews (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    projectType VARCHAR(100) NOT NULL,
+    projecttype VARCHAR(100) NOT NULL,
     project VARCHAR(100) NOT NULL,
     date TIMESTAMP NOT NULL DEFAULT NOW(),
     review_content TEXT NOT NULL,
