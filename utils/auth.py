@@ -5,7 +5,7 @@ from functools import wraps
 
 from flask import abort, request
 
-from config.core_config import ADMIN_API_KEY
+from config.core_config import app_configs
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def require_admin_key(f):
             logger.warning("Missing Admin Key. ip=%s path=%s", request.remote_addr, request.path)
             abort(401, "未授权: 缺少 Admin Key（X-Admin-API-Key 请求头或 ADMIN_API_KEY Cookie）。")
 
-        if not hmac.compare_digest(api_key, ADMIN_API_KEY):
+        if not hmac.compare_digest(api_key, app_configs.get("ADMIN_API_KEY")):
             logger.warning("Invalid Admin Key. ip=%s path=%s", request.remote_addr, request.path)
             abort(401, "未授权: Admin Key 无效。")
         return f(*args, **kwargs)

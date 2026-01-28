@@ -7,7 +7,6 @@ from urllib.parse import quote
 import requests
 
 from config.core_config import app_configs
-from config.postgres_config import gitlab_project_configs
 from utils.diff_parser import parse_single_file_diff
 
 logger = logging.getLogger(__name__)
@@ -102,17 +101,9 @@ def get_gitlab_mr_changes(project_id, mr_iid, access_token):
         logger.error(f"错误: 项目 {project_id} 未配置访问令牌。")
         return None, None
 
-    project_config = gitlab_project_configs.get(str(project_id), {})
+    project_config = app_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
-
-    current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL",
-                                                                                   "https://gitlab.com")
-    if project_specific_instance_url:
-        logger.info(f"项目 {project_id} 使用项目特定的 GitLab 实例 URL: {project_specific_instance_url}")
-    else:
-        logger.info(f"项目 {project_id} 使用全局 GitLab 实例 URL: {current_gitlab_instance_url}")
-
-    versions_url = f"{current_gitlab_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/versions"
+    versions_url = f"{project_specific_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/versions"
     headers = {"PRIVATE-TOKEN": access_token}
     structured_changes = {}
     position_info = None
@@ -132,7 +123,7 @@ def get_gitlab_mr_changes(project_id, mr_iid, access_token):
             logger.info(f"从最新版本 (ID: {latest_version_id}) 提取的位置信息: {position_info}")
 
             # current_gitlab_instance_url is already defined above using project-specific or global config
-            version_detail_url = f"{current_gitlab_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/versions/{latest_version_id}"
+            version_detail_url = f"{project_specific_instance_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/versions/{latest_version_id}"
             logger.info(f"从以下地址获取版本 ID {latest_version_id} 的详细信息: {version_detail_url}")
             version_detail_response = requests.get(version_detail_url, headers=headers, timeout=60)
             version_detail_response.raise_for_status()
@@ -308,7 +299,7 @@ def get_gitlab_mr_data_for_general_review(project_id: str, mr_iid: int, access_t
         logger.error(f"错误: 项目 {project_id} 未配置访问令牌。")
         return None
 
-    project_config = gitlab_project_configs.get(str(project_id), {})
+    project_config = app_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
     current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL",
                                                                                    "https://gitlab.com")
@@ -480,7 +471,7 @@ def add_gitlab_mr_comment(project_id, mr_iid, access_token, review, position_inf
         logger.error(f"错误: 无法添加评论，缺少必要的位置信息 (head_sha/base_sha/start_sha)。得到: {position_info}")
         return False
 
-    project_config = gitlab_project_configs.get(str(project_id), {})
+    project_config = app_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
 
     current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL","https://gitlab.com")
@@ -603,7 +594,7 @@ def add_gitlab_mr_general_comment(project_id: str, mr_iid: int, access_token: st
         logger.info("粗粒度审查文本为空，不添加评论。")
         return True
 
-    project_config = gitlab_project_configs.get(str(project_id), {})
+    project_config = app_configs.get(str(project_id), {})
     project_specific_instance_url = project_config.get("instance_url")
     current_gitlab_instance_url = project_specific_instance_url or app_configs.get("GITLAB_INSTANCE_URL","https://gitlab.com")
 

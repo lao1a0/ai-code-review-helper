@@ -3,22 +3,16 @@ import logging
 from typing import Optional
 
 from config.core_config import app_configs
-from config.postgres_config import gitlab_project_configs, github_repo_configs
 from services.llm_review_detailed_service import get_openai_detailed_review_for_file
 from services.notification_service import send_notifications
-from services.vcs_service import (
-    add_github_commit_comment,
-    add_gitlab_commit_comment,
-    get_github_push_changes,
-    get_gitlab_push_changes
-)
+from services.vcs_service import (add_github_commit_comment, add_gitlab_commit_comment, get_github_push_changes,
+                                  get_gitlab_push_changes)
 from webhooks.helpers import _save_review_results_and_log
 
 logger = logging.getLogger(__name__)
 
 _PUSH_AUDIT_IGNORED_EXTS = {  # docs / plain text (usually low-value for vuln review)
     ".md", ".markdown", ".mdx", ".rst", ".adoc", ".asciidoc", ".txt", ".text", ".csv", ".tsv", ".log",
-    # media / binaries
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".mp3", ".wav", ".flac", ".mp4", ".mov", ".avi",
     ".mkv", ".pdf", ".zip", ".tar", ".gz", ".tgz", ".7z", ".rar", ".woff", ".woff2", ".ttf", ".otf", ".exe", ".dll",
     ".so", ".dylib", }
@@ -81,8 +75,7 @@ def _make_push_audit_id(ref: str, after_sha: str) -> str:
 
 
 def _build_push_audit_summary_markdown(vcs_label: str, repo_or_project_display: str, ref: str, after_sha: str,
-                                       web_url: Optional[str], total_reviews: int
-) -> str:
+                                       web_url: Optional[str], total_reviews: int) -> str:
     sha_short = after_sha[:12] if after_sha else "N/A"
     url_line = f"\n- 链接: {web_url}" if web_url else ""
     return (f"**AI Push 审计结果**\n"
@@ -125,17 +118,15 @@ def _ensure_non_empty_reviews(vcs_label: str, reviews: list[dict]) -> list[dict]
 
 def _process_github_push_payload(access_token: str, owner: str, repo_name: str, repo_full_name: str, ref: str,
                                  audit_id: str, before_sha: str, after_sha: str, created: bool,
-                                 default_branch: Optional[str], repo_web_url: Optional[str]
-):
+                                 default_branch: Optional[str], repo_web_url: Optional[str]):
     if not app_configs.get("PUSH_AUDIT_ENABLED", True):
         logger.info("GitHub (Push): PUSH_AUDIT_ENABLED=false，跳过审计。")
         return
 
-    max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES", 20) or 20)
+    max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES"))
     structured_changes = get_github_push_changes(owner=owner, repo_name=repo_name, before_sha=before_sha,
                                                  after_sha=after_sha, access_token=access_token, created=created,
-                                                 default_branch=default_branch, max_files=max_files
-)
+                                                 default_branch=default_branch, max_files=max_files)
     if structured_changes is None:
         logger.warning("GitHub (Push): 获取或解析 diff 失败，中止审计。")
         return
@@ -159,35 +150,32 @@ def _process_github_push_payload(access_token: str, owner: str, repo_name: str, 
                                  branch=ref.split('/')[-1], project_url=repo_web_url)
     summary = _build_push_audit_summary_markdown(vcs_label="GitHub", repo_or_project_display=repo_full_name, ref=ref,
                                                  after_sha=after_sha, web_url=repo_web_url, total_reviews=len(
-            [r for r in all_reviews if "Overall GitHub Push Audit" not in str(r.get("file", ""))])
-)
+            [r for r in all_reviews if "Overall GitHub Push Audit" not in str(r.get("file", ""))]))
     if skipped:
         summary += f"\n- 已跳过文件数: {len(skipped)}（文档/二进制/无有效diff 等）\n"
     summary += _format_reviews_as_markdown(all_reviews)
     send_notifications(summary)
 
-    if app_configs.get("PUSH_AUDIT_POST_COMMIT_COMMENT", False):
+    if app_configs.get("PUSH_AUDIT_POST_COMMIT_COMMENT"):
         body = summary
         add_github_commit_comment(owner, repo_name, after_sha, access_token, body)
 
 
 def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: str, audit_id: str, before_sha: str,
                                  after_sha: str, project_name: Optional[str], project_web_url: Optional[str],
-                                 created: bool, default_branch: Optional[str]
-):
-    if not app_configs.get("PUSH_AUDIT_ENABLED", True):
+                                 created: bool, default_branch: Optional[str]):
+    if not app_configs.get("PUSH_AUDIT_ENABLED"):
         logger.info("GitLab (Push): PUSH_AUDIT_ENABLED=false，跳过审计。")
         return
 
-    project_config = gitlab_project_configs.get(str(project_id_str), {})
+    project_config = app_configs.get(project_id_str)
     project_specific_instance_url = project_config.get("instance_url")
 
-    max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES", 20) or 20)
+    max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES"))
     structured_changes = get_gitlab_push_changes(project_id_str=str(project_id_str), before_sha=before_sha,
                                                  after_sha=after_sha, access_token=access_token,
                                                  instance_url=project_specific_instance_url, created=created,
-                                                 default_branch=default_branch, max_files=max_files
-)
+                                                 default_branch=default_branch, max_files=max_files)
     if structured_changes is None:
         logger.warning("GitLab (Push): 获取或解析 diff 失败，中止审计。")
         return
@@ -208,12 +196,12 @@ def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: st
     _save_review_results_and_log(vcs_type="gitlab_push", identifier=str(project_id_str), pr_mr_id=audit_id,
                                  commit_sha=after_sha,
                                  review_json_string=json.dumps(all_reviews, ensure_ascii=False, indent=2),
-                                 project_name_for_gitlab=project_name or str(project_id_str), branch=ref.split('/')[-1], project_url=project_web_url)
+                                 project_name_for_gitlab=project_name or str(project_id_str), branch=ref.split('/')[-1],
+                                 project_url=project_web_url)
     display_name = project_name or str(project_id_str)
     summary = _build_push_audit_summary_markdown(vcs_label="GitLab", repo_or_project_display=display_name, ref=ref,
                                                  after_sha=after_sha, web_url=project_web_url, total_reviews=len(
-            [r for r in all_reviews if "Overall GitLab Push Audit" not in str(r.get("file", ""))])
-)
+            [r for r in all_reviews if "Overall GitLab Push Audit" not in str(r.get("file", ""))]))
     if skipped:
         summary += f"\n- 已跳过文件数: {len(skipped)}（文档/二进制/无有效diff 等）\n"
     summary += _format_reviews_as_markdown(all_reviews)
@@ -222,8 +210,8 @@ def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: st
     if app_configs.get("PUSH_AUDIT_POST_COMMIT_COMMENT", False):
         note = summary
         add_gitlab_commit_comment(project_id_str=str(project_id_str), commit_sha=after_sha, access_token=access_token,
-                                  note=note, instance_url=project_specific_instance_url
-)
+                                  note=note, instance_url=project_specific_instance_url)
+
 
 def get_final_summary_comment_text() -> str:
     """

@@ -27,7 +27,6 @@
                 <button class="nav-item active" data-page="dashboard" type="button">Dashboard</button>
                 <button class="nav-item" data-page="reviews" type="button">审查记录</button>
                 <button class="nav-item" data-page="projects" type="button">项目管理</button>
-                <button class="nav-item" data-page="members" type="button">成员分析</button>
                 <button class="nav-item" data-page="llm" type="button">大模型管理</button>
                 <button class="nav-item" data-page="notify" type="button">通知机器人</button>
                 <button class="nav-item" data-page="logs" type="button">系统日志</button>
@@ -195,35 +194,6 @@
                     </div>
                 </div>
                 <div class="hint">项目来源：GitHub/GitLab 配置（旧版管理）+ 项目设置（本控制台）</div>
-            </section>
-
-            <!-- Members -->
-            <section class="page" data-page="members">
-                <div class="page-header">
-                    <h2>成员分析</h2>
-                    <div class="page-actions">
-                        <button class="btn" id="btnReloadMembers" type="button">Reload</button>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="table-wrap">
-                        <table class="table" id="membersTable">
-                            <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Username</th>
-                                <th>Nickname</th>
-                                <th>LLM Type</th>
-                                <th>LLM URL</th>
-                                <th>Created At</th>
-                                <th>Updated At</th>
-                            </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="hint">Data: <code>/api/users</code> (Admin Key required)</div>
             </section>
 
             <!-- LLM -->

@@ -6,8 +6,7 @@ import yaml
 from flask import Blueprint, jsonify, render_template, request
 
 from config.core_config import app_configs
-from config.postgres_config import get_all_reviewed_prs_mrs_keys, get_review_results, gitlab_project_configs, github_repo_configs
-from db.models import User
+from config.postgres_config import get_all_reviewed_prs_mrs_keys, get_review_results
 from services import app_log, rag_call_graph, rag_service, review_enrichment, settings_store, skill_registry
 from services.vcs_service import get_github_pr_changes, get_gitlab_mr_changes
 from utils.auth import require_admin_key
@@ -76,7 +75,7 @@ def _project_key(platform: str, identifier: str) -> str:
 def api_projects_list():
     projects = []
 
-    for repo_full_name, conf in (github_repo_configs or {}).items():
+    for repo_full_name, conf in (app_configs or {}).items():
         key = _project_key("github", repo_full_name)
         settings = settings_store.get_project_settings(key)
         projects.append({
@@ -88,7 +87,7 @@ def api_projects_list():
             "settings": settings,
         })
 
-    for project_id, conf in (gitlab_project_configs or {}).items():
+    for project_id, conf in (app_configs or {}).items():
         project_id_str = str(project_id)
         key = _project_key("gitlab", project_id_str)
         settings = settings_store.get_project_settings(key)
@@ -103,13 +102,6 @@ def api_projects_list():
         })
 
     return jsonify({"projects": projects}), 200
-
-
-@bp.route("/api/users", methods=["GET"])
-@require_admin_key
-def api_users_list():
-    users = User.query.order_by(User.created_at.desc()).all()
-    return jsonify({"users": [u.to_dict() for u in users]}), 200
 
 
 @bp.route("/api/projects/<path:project_key>/settings", methods=["GET"])
@@ -220,13 +212,13 @@ def api_rag_call_graph():
             if not parsed:
                 return jsonify({"error": "Invalid GitHub identifier. Expected owner/repo"}), 400
             owner, repo = parsed
-            cfg = github_repo_configs.get(identifier) or {}
+            cfg = app_configs.get(identifier) or {}
             token = cfg.get("token")
             if not token:
                 return jsonify({"error": "GitHub token not configured for this repo"}), 400
             structured_changes = get_github_pr_changes(owner, repo, pr_mr_id, token) or {}
         elif base == "gitlab":
-            cfg = gitlab_project_configs.get(str(identifier)) or {}
+            cfg = app_configs.get(str(identifier)) or {}
             token = cfg.get("token")
             if not token:
                 return jsonify({"error": "GitLab token not configured for this project"}), 400
