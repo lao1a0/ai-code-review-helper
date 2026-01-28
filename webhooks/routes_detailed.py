@@ -6,14 +6,7 @@ from webhooks.push_process import get_final_summary_comment_text
 from webhooks.helpers import _save_review_results_and_log
 from services import rag_service
 from services.notification_service import send_notifications
-from services.vcs_service import (
-    add_github_pr_comment,
-    add_github_pr_general_comment,
-    add_gitlab_mr_comment,
-    add_gitlab_mr_general_comment,
-    get_github_pr_changes,
-    get_gitlab_mr_changes
-)
+from services.vcs_service import VCSService
 from utils.auth import verify_github_signature, verify_gitlab_signature
 logger = logging.getLogger(__name__)
 
@@ -46,7 +39,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
                                      pr_html_url, repo_web_url, pr_source_branch, pr_target_branch):
     """实际处理 GitHub 详细审查的核心逻辑 (逐文件审查和评论)。"""
     logger.info("GitHub (详细审查): 正在获取并解析 PR 变更...")
-    structured_changes = get_github_pr_changes(owner, repo_name, pull_number, access_token)
+    structured_changes = VCSService.get_github_pr_changes(owner, repo_name, pull_number, access_token)
 
     if structured_changes is None:
         logger.warning("GitHub (详细审查): 获取或解析 diff 内容失败。中止审查。")
@@ -103,7 +96,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
                 if "old_path" not in review_item and file_data.get("old_path"):
                     review_item["old_path"] = file_data["old_path"]
 
-                success = add_github_pr_comment(owner, repo_name, pull_number, access_token, review_item, head_sha)
+                success = VCSService.add_github_pr_comment(owner, repo_name, pull_number, access_token, review_item, head_sha)
                 if success:
                     file_comments_added += 1
                     total_comments_posted_successfully += 1
@@ -133,7 +126,7 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
 
     # 如果没有任何评论被成功发布 (或 all_reviews_for_storage 为空)
     if not all_reviews_for_storage:  # 或者 total_comments_posted_successfully == 0
-        _post_no_issues_comment(vcs_type='github', comment_function=add_github_pr_comment, owner=owner,
+        _post_no_issues_comment(vcs_type='github', comment_function=VCSService.add_github_pr_comment, owner=owner,
                                 repo_name=repo_name, pull_number=pull_number, access_token=access_token,
                                 head_sha=head_sha)
 
@@ -152,14 +145,14 @@ def _process_github_detailed_payload(access_token, owner, repo_name, pull_number
         # send_to_wecom_bot(summary_content) # 旧调用 - 已被 send_notifications 替代
         send_notifications(summary_content)  # 新调用
     final_comment_text = get_final_summary_comment_text()
-    add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
+    VCSService.add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
 
 
 def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_sha_payload, project_data, mr_attrs,
                                      project_web_url, mr_title, mr_url, project_name_from_payload):
     """实际处理 GitLab 详细审查的核心逻辑。"""
     logger.info("GitLab (详细审查): 正在获取并解析 MR 变更...")
-    structured_changes, position_info = get_gitlab_mr_changes(project_id_str, mr_iid, access_token)
+    structured_changes, position_info = VCSService.get_gitlab_mr_changes(project_id_str, mr_iid, access_token)
 
     if position_info is None: position_info = {}
     if head_sha_payload and not position_info.get("head_sha"):
@@ -238,7 +231,7 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
                     if used_sources:
                         review.setdefault("rag_sources", used_sources)
             if isinstance(review, dict):
-                success = add_gitlab_mr_comment(project_id_str, mr_iid, access_token, review, position_info)
+                success = VCSService.add_gitlab_mr_comment(project_id_str, mr_iid, access_token, review, position_info)
                 if success:
                     comments_added += 1
                 else:
@@ -248,7 +241,7 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
                 comments_failed += 1
         logger.info(f"GitLab (详细审查): 添加评论完成: {comments_added} 成功, {comments_failed} 失败。")
     else:
-        _post_no_issues_comment(vcs_type='gitlab', comment_function=add_gitlab_mr_comment, project_id=project_id_str,
+        _post_no_issues_comment(vcs_type='gitlab', comment_function=VCSService.add_gitlab_mr_comment, project_id=project_id_str,
                                 mr_iid=mr_iid, access_token=access_token, position_info=position_info)
 
     if app_configs.get("WECOM_BOT_WEBHOOK_URL"):
@@ -269,4 +262,4 @@ def _process_gitlab_detailed_payload(access_token, project_id_str, mr_iid, head_
         # send_to_wecom_bot(summary_content) # 旧调用
         send_notifications(summary_content)  # 新调用
     final_comment_text = get_final_summary_comment_text()
-    add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)
+    VCSService.add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)

@@ -5,8 +5,7 @@ from typing import Optional
 from config.core_config import app_configs
 from services.llm_review_detailed_service import get_openai_detailed_review_for_file
 from services.notification_service import send_notifications
-from services.vcs_service import (add_github_commit_comment, add_gitlab_commit_comment, get_github_push_changes,
-                                  get_gitlab_push_changes)
+from services.vcs_service import VCSService
 from webhooks.helpers import _save_review_results_and_log
 
 logger = logging.getLogger(__name__)
@@ -124,7 +123,7 @@ def _process_github_push_payload(access_token: str, owner: str, repo_name: str, 
         return
 
     max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES"))
-    structured_changes = get_github_push_changes(owner=owner, repo_name=repo_name, before_sha=before_sha,
+    structured_changes = VCSService.get_github_push_changes(owner=owner, repo_name=repo_name, before_sha=before_sha,
                                                  after_sha=after_sha, access_token=access_token, created=created,
                                                  default_branch=default_branch, max_files=max_files)
     if structured_changes is None:
@@ -158,7 +157,7 @@ def _process_github_push_payload(access_token: str, owner: str, repo_name: str, 
 
     if app_configs.get("PUSH_AUDIT_POST_COMMIT_COMMENT"):
         body = summary
-        add_github_commit_comment(owner, repo_name, after_sha, access_token, body)
+        VCSService.add_github_commit_comment(owner, repo_name, after_sha, access_token, body)
 
 
 def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: str, audit_id: str, before_sha: str,
@@ -172,7 +171,7 @@ def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: st
     project_specific_instance_url = project_config.get("instance_url")
 
     max_files = int(app_configs.get("PUSH_AUDIT_MAX_FILES"))
-    structured_changes = get_gitlab_push_changes(project_id_str=str(project_id_str), before_sha=before_sha,
+    structured_changes = VCSService.get_gitlab_push_changes(project_id_str=str(project_id_str), before_sha=before_sha,
                                                  after_sha=after_sha, access_token=access_token,
                                                  instance_url=project_specific_instance_url, created=created,
                                                  default_branch=default_branch, max_files=max_files)
@@ -209,7 +208,7 @@ def _process_gitlab_push_payload(access_token: str, project_id_str: str, ref: st
 
     if app_configs.get("PUSH_AUDIT_POST_COMMIT_COMMENT", False):
         note = summary
-        add_gitlab_commit_comment(project_id_str=str(project_id_str), commit_sha=after_sha, access_token=access_token,
+        VCSService.add_gitlab_commit_comment(project_id_str=str(project_id_str), commit_sha=after_sha, access_token=access_token,
                                   note=note, instance_url=project_specific_instance_url)
 
 

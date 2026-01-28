@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, render_template, request
 from config.core_config import app_configs
 from config.postgres_config import get_all_reviewed_prs_mrs_keys, get_review_results
 from services import app_log, rag_call_graph, rag_service, review_enrichment, settings_store, skill_registry
-from services.vcs_service import get_github_pr_changes, get_gitlab_mr_changes
+from services.vcs_service import VCSService
 from utils.auth import require_admin_key
 
 logger = logging.getLogger(__name__)
@@ -216,13 +216,13 @@ def api_rag_call_graph():
             token = cfg.get("token")
             if not token:
                 return jsonify({"error": "GitHub token not configured for this repo"}), 400
-            structured_changes = get_github_pr_changes(owner, repo, pr_mr_id, token) or {}
+            structured_changes = VCSService.get_github_pr_changes(owner, repo, pr_mr_id, token) or {}
         elif base == "gitlab":
             cfg = app_configs.get(str(identifier)) or {}
             token = cfg.get("token")
             if not token:
                 return jsonify({"error": "GitLab token not configured for this project"}), 400
-            structured_changes, _position = get_gitlab_mr_changes(identifier, pr_mr_id, token)
+            structured_changes, _position = VCSService.get_gitlab_mr_changes(identifier, pr_mr_id, token)
             structured_changes = structured_changes or {}
         else:
             return jsonify({"error": f"Unsupported vcs_type: {vcs_type}"}), 400

@@ -7,12 +7,7 @@ from webhooks.helpers import _save_review_results_and_log
 from services.llm_review_general_service import get_openai_code_review_general
 from services import rag_service
 from services.notification_service import send_notifications
-from services.vcs_service import (
-    add_github_pr_general_comment,
-    add_gitlab_mr_general_comment,
-    get_github_pr_data_for_general_review,
-    get_gitlab_mr_data_for_general_review
-)
+from services.vcs_service import VCSService
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +16,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
                                     pr_title, pr_html_url, repo_web_url, pr_source_branch, pr_target_branch):
     """实际处理 GitHub 通用审查的核心逻辑。"""
     logger.info("GitHub (通用审查): 正在获取 PR 数据 (diffs 和文件内容)...")
-    file_data_list = get_github_pr_data_for_general_review(owner, repo_name, pull_number, access_token, pr_data)
+    file_data_list = VCSService.get_github_pr_data_for_general_review(owner, repo_name, pull_number, access_token, pr_data)
 
     if file_data_list is None:
         logger.warning("GitHub (通用审查): 获取 PR 数据失败。中止审查。")
@@ -66,7 +61,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
 
             logger.info(f"GitHub (通用审查): 文件 {current_file_path} 发现问题。正在添加评论...")
             comment_text_for_pr = f"**AI 审查意见 (文件: `{current_file_path}`)**\n\n{review_text_for_file}"
-            add_github_pr_general_comment(owner, repo_name, pull_number, access_token, comment_text_for_pr)
+            VCSService.add_github_pr_general_comment(owner, repo_name, pull_number, access_token, comment_text_for_pr)
 
             files_with_issues_details.append({"file": current_file_path, "issues": review_text_for_file})
 
@@ -89,7 +84,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
     else:
         logger.info("GitHub (通用审查): 所有被检查的文件均未发现问题。")
         no_issues_text = f"AI General Code Review 已完成，对 {len(file_data_list)} 个文件的检查均未发现主要问题或无审查建议。"
-        add_github_pr_general_comment(owner, repo_name, pull_number, access_token, no_issues_text)
+        VCSService.add_github_pr_general_comment(owner, repo_name, pull_number, access_token, no_issues_text)
         _save_review_results_and_log(vcs_type='github_general', identifier=repo_full_name, pr_mr_id=str(pull_number),
                                      commit_sha=head_sha, review_json_string=json.dumps([]), branch=pr_source_branch
                                      # Save empty list
@@ -116,7 +111,7 @@ def _process_github_general_payload(access_token, owner, repo_name, pull_number,
         send_notifications(summary_content)  # 新调用
     # 添加最终总结评论
     final_comment_text = get_final_summary_comment_text()
-    add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
+    VCSService.add_github_pr_general_comment(owner, repo_name, pull_number, access_token, final_comment_text)
 
 
 def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_attrs, final_position_info,
@@ -124,7 +119,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
                                     project_web_url, mr_title, mr_url):
     """实际处理 GitLab 通用审查的核心逻辑。"""
     logger.info("GitLab (通用审查): 正在获取 MR 数据 (diffs 和文件内容)...")
-    file_data_list = get_gitlab_mr_data_for_general_review(project_id_str, mr_iid, access_token, mr_attrs,
+    file_data_list = VCSService.get_gitlab_mr_data_for_general_review(project_id_str, mr_iid, access_token, mr_attrs,
                                                            final_position_info)
 
     if file_data_list is None:
@@ -170,7 +165,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
 
             logger.info(f"GitLab (通用审查): 文件 {current_file_path} 发现问题。正在添加评论...")
             comment_text_for_mr = f"**AI 审查意见 (文件: `{current_file_path}`)**\n\n{review_text_for_file}"
-            add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, comment_text_for_mr)
+            VCSService.add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, comment_text_for_mr)
 
             files_with_issues_details.append({"file": current_file_path, "issues": review_text_for_file})
 
@@ -195,7 +190,7 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
     else:
         logger.info("GitLab (通用审查): 所有被检查的文件均未发现问题。")
         no_issues_text = f"AI General Code Review 已完成，对 {len(file_data_list)} 个文件的检查均未发现主要问题或无审查建议。"
-        add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, no_issues_text)
+        VCSService.add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, no_issues_text)
         _save_review_results_and_log(vcs_type='gitlab_general', identifier=project_id_str, pr_mr_id=str(mr_iid),
                                      commit_sha=current_commit_sha_for_ops, review_json_string=json.dumps([]),
                                      # Save empty list
@@ -224,4 +219,4 @@ def _process_gitlab_general_payload(access_token, project_id_str, mr_iid, mr_att
         send_notifications(summary_content)
     # 添加最终总结评论
     final_comment_text = get_final_summary_comment_text()
-    add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)
+    VCSService.add_gitlab_mr_general_comment(project_id_str, mr_iid, access_token, final_comment_text)
