@@ -141,6 +141,7 @@ function escapeMermaid(s) {
 
 let SKILLS = [];
 let AGENT_SETTINGS = {};
+let CURRENT_PROJECT_KEY = null;
 let CURRENT_REVIEW_KEY = null; // {vcs_type, identifier, pr_mr_id}
 
 async function loadSkills() {
@@ -368,22 +369,117 @@ async function loadProjects() {
     renderProjectsTable();
 }
 
-function renderProjectsTable() {
-    const tbody = document.querySelector('#projectsTable tbody');
-    tbody.innerHTML = "";
-    for (const p of (window.__PROJECTS || [])) {
+async function loadMembers() {
+    const data = await apiFetch('/api/users');
+    window.__USERS = data.users || [];
+    renderMembersTable();
+}
+
+function renderMembersTable() {
+    const tbody = document.querySelector('#membersTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    for (const u of (window.__USERS || [])) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${p.name || ""}</td>
-            <td>${p.platform || ""}</td>
-            <td>${p.repo_url || ""}</td>
-            <td>${p.project_key || ""}</td>
-            <td>${p.is_active ? "yes" : "no"}</td>
-            <td>${p.created_at || ""}</td>
+            <td>${u.id || ''}</td>
+            <td>${u.username || ''}</td>
+            <td>${u.nickname || ''}</td>
+            <td>${u.llm_type || ''}</td>
+            <td>${u.llm_url || ''}</td>
+            <td>${u.created_at || ''}</td>
+            <td>${u.updated_at || ''}</td>
         `;
         tbody.appendChild(tr);
     }
 }
+
+function renderProjectsTable() {
+    const tbody = document.querySelector('#projectsTable tbody');
+    tbody.innerHTML = '';
+    for (const p of (window.__PROJECTS || [])) {
+        const tr = document.createElement('tr');
+        const s = p.settings || {};
+        const rag = s.rag || {};
+        const skills = (s.skills_enabled || []).join(', ');
+        const ragLabel = rag.enabled ? 'enabled' : 'disabled';
+
+        tr.innerHTML = `
+            <td>${p.platform}</td>
+            <td>${p.identifier}</td>
+            <td>${ragLabel}</td>
+            <td>${skills}</td>
+            <td><button class="btn" data-edit="${p.project_key}" type="button">编辑</button></td>
+        `;
+        tr.querySelector('button[data-edit]').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openProjectSettings(p.project_key);
+        });
+        tbody.appendChild(tr);
+    }
+}
+
+async function openProjectSettings(projectKey) {
+    CURRENT_PROJECT_KEY = projectKey;
+    const data = await apiFetch(`/api/projects/${encodeURIComponent(projectKey)}/settings`);
+    const settings = data.settings || {};
+
+    document.getElementById('projectModalTitle').textContent = `项目设置：${projectKey}`;
+    const rag = settings.rag || {};
+    const sources = rag.sources || {};
+    const indexer = rag.index || {};
+    const call = rag.call_chain || {};
+
+    document.getElementById('projRagEnabled').checked = !!rag.enabled;
+    document.getElementById('projRagCode').checked = sources.code !== false;
+    document.getElementById('projRagDocs').checked = !!sources.docs;
+    document.getElementById('projRagDeps').checked = !!sources.deps;
+
+    document.getElementById('projIndexStrategy').value = indexer.strategy || 'commit';
+    document.getElementById('projBranch').value = indexer.branch || '';
+    document.getElementById('projParser').value = indexer.parser || 'python';
+
+    document.getElementById('projCallChainEnabled').checked = !!call.enabled;
+    document.getElementById('projCallChainDepth').value = call.max_depth || 3;
+    document.getElementById('projCallChainCrossFile').checked = !!call.cross_file;
+
+    renderSkillPicker(document.getElementById('projectSkillPicker'), settings.skills_enabled || []);
+
+    openModal('projectBackdrop', 'projectModal', { closeOthers: true });
+}
+
+async function saveProjectSettingsFromUI() {
+    const picker = document.getElementById('projectSkillPicker');
+    const skillsEnabled = selectedSkillNames(picker);
+
+    const payload = {
+        skills_enabled: skillsEnabled,
+        rag: {
+            enabled: document.getElementById('projRagEnabled').checked,
+            sources: {
+                code: document.getElementById('projRagCode').checked,
+                docs: document.getElementById('projRagDocs').checked,
+                deps: document.getElementById('projRagDeps').checked,
+            },
+            index: {
+                strategy: document.getElementById('projIndexStrategy').value,
+                branch: document.getElementById('projBranch').value,
+                parser: document.getElementById('projParser').value,
+            },
+            call_chain: {
+                enabled: document.getElementById('projCallChainEnabled').checked,
+                max_depth: Number(document.getElementById('projCallChainDepth').value || 3),
+                cross_file: document.getElementById('projCallChainCrossFile').checked,
+            }
+        }
+    };
+
+    await apiFetch(`/api/projects/${encodeURIComponent(CURRENT_PROJECT_KEY)}/settings`, { method: 'POST', body: JSON.stringify(payload) });
+    closeModal('projectBackdrop', 'projectModal');
+    showStatus('已保存项目设置');
+    await loadProjects();
+}
+
 async function openReviewDetail(vcsType, identifier, prMrId) {
     CURRENT_REVIEW_KEY = { vcs_type: vcsType, identifier, pr_mr_id: prMrId };
     document.getElementById('reviewModalTitle').textContent = `审查详情：${vcsType}:${identifier}#${prMrId}`;
@@ -511,6 +607,7 @@ async function init() {
             // Lazy load per page.
             if (page === 'reviews') await loadReviews();
             if (page === 'projects') await loadProjects();
+            if (page === 'members') await loadMembers();
             if (page === 'logs') await loadLogs();
             if (page === 'llm' || page === 'notify') await loadGlobalSettingsIntoUI();
         });
@@ -538,6 +635,9 @@ async function init() {
     document.getElementById('skillBackdrop').addEventListener('click', () => closeModal('skillBackdrop', 'skillModal'));
 
     // Project modal
+    document.getElementById('btnCloseProject').addEventListener('click', () => closeModal('projectBackdrop', 'projectModal'));
+    document.getElementById('projectBackdrop').addEventListener('click', () => closeModal('projectBackdrop', 'projectModal'));
+    document.getElementById('btnSaveProjectSettings').addEventListener('click', saveProjectSettingsFromUI);
 
     // Review modal
     document.getElementById('btnCloseReview').addEventListener('click', () => closeModal('reviewBackdrop', 'reviewModal'));
@@ -584,6 +684,9 @@ async function init() {
 
     // Projects
     document.getElementById('btnReloadProjects').addEventListener('click', loadProjects);
+
+    // Members
+    document.getElementById('btnReloadMembers').addEventListener('click', loadMembers);
 
     // LLM / Notify
     document.getElementById('btnReloadLlm').addEventListener('click', loadGlobalSettingsIntoUI);

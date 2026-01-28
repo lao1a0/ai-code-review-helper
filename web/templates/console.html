@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CodeReviewer</title>
-    <link rel="icon" href="{{ url_for('static', filename='img/ico.jpg') }}" type="image/jpeg">
+    <title>AI Code Review Helper - Console</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/console.css') }}">
 </head>
 <body>
@@ -13,7 +12,7 @@
         <div class="header-left">
             <div class="logo">AI</div>
             <div>
-                <div class="title">CodeReviewer</div>
+                <div class="title">AI Code Review Helper</div>
                 <div class="subtitle">RAG + Skill 管理控制台</div>
             </div>
         </div>
@@ -184,31 +183,47 @@
                         <table class="table" id="projectsTable">
                             <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Platform</th>
-                                <th>Repo URL</th>
-                                <th>Project Key</th>
-                                <th>Active</th>
-                                <th>Created</th>
+                                <th>平台</th>
+                                <th>标识</th>
+                                <th>RAG</th>
+                                <th>Skills</th>
+                                <th>操作</th>
                             </tr>
+                            </thead>
                             <tbody></tbody>
                         </table>
                     </div>
                 </div>
-                <div class="hint">Data: <code>/api/projects</code></div>
+                <div class="hint">项目来源：GitHub/GitLab 配置（旧版管理）+ 项目设置（本控制台）</div>
             </section>
 
             <!-- Members -->
             <section class="page" data-page="members">
                 <div class="page-header">
                     <h2>成员分析</h2>
-                </div>
-                <div class="card">
-                    <div class="empty">
-                        当前版本未接入成员数据（需要从 GitHub/GitLab API 获取 PR/MR 作者、审查参与度等）。
-                        这里预留“技能画像 / 风险行为 / RAG 贡献”面板位点。
+                    <div class="page-actions">
+                        <button class="btn" id="btnReloadMembers" type="button">Reload</button>
                     </div>
                 </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table" id="membersTable">
+                            <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Username</th>
+                                <th>Nickname</th>
+                                <th>LLM Type</th>
+                                <th>LLM URL</th>
+                                <th>Created At</th>
+                                <th>Updated At</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="hint">Data: <code>/api/users</code> (Admin Key required)</div>
             </section>
 
             <!-- LLM -->
@@ -339,6 +354,58 @@
     </div>
     <div class="modal-body">
         <pre class="pre" id="skillDoc"></pre>
+    </div>
+</div>
+
+<!-- Modal: Project Settings -->
+<div class="modal-backdrop" id="projectBackdrop" hidden></div>
+<div class="modal large" id="projectModal" hidden>
+    <div class="modal-header">
+        <div class="modal-title" id="projectModalTitle">项目设置</div>
+        <button class="btn" id="btnCloseProject" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+        <div class="grid two">
+            <div class="card inner">
+                <div class="card-title">RAG 数据源配置</div>
+                <div class="form-grid">
+                    <label class="check"><input type="checkbox" id="projRagEnabled"> 启用 RAG</label>
+                    <label class="check"><input type="checkbox" id="projRagCode"> 代码索引/上下文</label>
+                    <label class="check"><input type="checkbox" id="projRagDocs"> 文档库</label>
+                    <label class="check"><input type="checkbox" id="projRagDeps"> 依赖文档</label>
+                </div>
+                <div class="form-grid">
+                    <label>索引策略
+                        <select id="projIndexStrategy" class="select">
+                            <option value="commit">按提交</option>
+                            <option value="schedule">按定时</option>
+                        </select>
+                    </label>
+                    <label>分支 <input id="projBranch" class="input" placeholder="main"></label>
+                    <label>语言解析器
+                        <select id="projParser" class="select">
+                            <option value="python">Python</option>
+                            <option value="java">Java</option>
+                            <option value="go">Go</option>
+                            <option value="js">JS/TS</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <label class="check"><input type="checkbox" id="projCallChainEnabled"> 调用链补全</label>
+                    <label>最大深度 <input type="number" id="projCallChainDepth" class="input" min="1" max="10" value="3"></label>
+                    <label class="check"><input type="checkbox" id="projCallChainCrossFile"> 跨文件</label>
+                </div>
+            </div>
+            <div class="card inner">
+                <div class="card-title">Skill 绑定</div>
+                <div class="hint">为项目绑定默认技能集（支持项目级覆盖与版本化位点）</div>
+                <div id="projectSkillPicker" class="skill-picker"></div>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="btn primary" id="btnSaveProjectSettings" type="button">保存</button>
+        </div>
     </div>
 </div>
 

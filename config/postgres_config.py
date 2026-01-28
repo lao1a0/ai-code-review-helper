@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from config.core_config import app_configs
@@ -138,33 +138,52 @@ def _sync_review_to_project_tables(vcs_type: str, identifier: str, pr_mr_id: str
         ai_name = app_configs.get("OPENAI_MODEL", "ai")
 
         if base == "github":
-            existing = GitHubReview.query.filter_by(project_id=project.id, pr_mr_id=str(pr_mr_id),
-                commit_sha=commit_sha, ).first()
+            existing = GitHubReview.query.filter_by(
+                project_id=project.id,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha,
+            ).first()
             if existing:
                 existing.review_content = review_json_string
                 existing.branch = branch
                 existing.date = review_time
             else:
-                db.session.add(GitHubReview(project_id=project.id, ai_name=ai_name, review_content=review_json_string,
-                    quality_score=None, commit_sha=commit_sha, pr_mr_id=str(pr_mr_id), branch=branch,
-                    date=review_time, ))
+                db.session.add(GitHubReview(
+                    project_id=project.id,
+                    ai_name=ai_name,
+                    review_content=review_json_string,
+                    quality_score=None,
+                    commit_sha=commit_sha,
+                    pr_mr_id=str(pr_mr_id),
+                    branch=branch,
+                    date=review_time,
+                ))
         else:
-            existing = GitLabReview.query.filter_by(project_id=project.id, pr_mr_id=str(pr_mr_id),
-                commit_sha=commit_sha, ).first()
+            existing = GitLabReview.query.filter_by(
+                project_id=project.id,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha,
+            ).first()
             if existing:
                 existing.review_content = review_json_string
                 existing.branch = branch
                 existing.date = review_time
             else:
-                db.session.add(GitLabReview(project_id=project.id, ai_name=ai_name, review_content=review_json_string,
-                    quality_score=None, commit_sha=commit_sha, pr_mr_id=str(pr_mr_id), branch=branch,
-                    date=review_time, ))
+                db.session.add(GitLabReview(
+                    project_id=project.id,
+                    ai_name=ai_name,
+                    review_content=review_json_string,
+                    quality_score=None,
+                    commit_sha=commit_sha,
+                    pr_mr_id=str(pr_mr_id),
+                    branch=branch,
+                    date=review_time,
+                ))
 
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         logger.error(f"Failed to sync review results into project/review tables: {e}")
-
 
 def init_postgres_config():
     """初始化PostgreSQL配置存储。确保数据库表存在。"""
@@ -177,7 +196,6 @@ def init_postgres_config():
     except Exception as e:
         logger.critical(f"初始化PostgreSQL配置存储失败: {e}")
         raise ValueError(e)
-
 
 def load_configs_from_postgres():
     """从PostgreSQL加载配置到内存中。"""
@@ -207,7 +225,6 @@ def load_configs_from_postgres():
     except Exception as e:
         logger.error(f"从PostgreSQL加载配置时发生意外错误: {e}")
 
-
 def save_config_to_postgres(config_type: str, key: str, config_data: dict):
     """保存配置到PostgreSQL。"""
     try:
@@ -236,7 +253,6 @@ def save_config_to_postgres(config_type: str, key: str, config_data: dict):
         logger.error(f"保存{config_type}配置到PostgreSQL时出错: {e}")
         raise
 
-
 def delete_config_from_postgres(config_type: str, key: str):
     """从PostgreSQL删除配置。"""
     try:
@@ -259,9 +275,7 @@ def delete_config_from_postgres(config_type: str, key: str):
         logger.error(f"删除{config_type}配置从PostgreSQL时出错: {e}")
         raise
 
-
-def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str,
-                        project_name: str = None, branch: str = None, created_at: str = None, project_url: str = None):
+def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str, review_json_string: str, project_name: str = None, branch: str = None, created_at: str = None, project_url: str = None):
     """将AI审查结果保存到PostgreSQL。"""
     if not commit_sha:
         logger.warning(f"警告: commit_sha为空，针对{vcs_type}:{identifier}:{pr_mr_id}。跳过保存审查结果。")
@@ -269,8 +283,12 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
 
     try:
         # 检查是否已存在
-        existing = ReviewResult.query.filter_by(vcs_type=vcs_type, identifier=identifier, pr_mr_id=str(pr_mr_id),
-            commit_sha=commit_sha).first()
+        existing = ReviewResult.query.filter_by(
+            vcs_type=vcs_type,
+            identifier=identifier,
+            pr_mr_id=str(pr_mr_id),
+            commit_sha=commit_sha
+        ).first()
 
         if existing:
             existing.review_json = review_json_string
@@ -278,8 +296,15 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
             existing.branch = branch
             existing.updated_at = datetime.utcnow()
         else:
-            review_result = ReviewResult(vcs_type=vcs_type, identifier=identifier, pr_mr_id=str(pr_mr_id),
-                commit_sha=commit_sha, review_json=review_json_string, project_name=project_name, branch=branch)
+            review_result = ReviewResult(
+                vcs_type=vcs_type,
+                identifier=identifier,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha,
+                review_json=review_json_string,
+                project_name=project_name,
+                branch=branch
+            )
             db.session.add(review_result)
 
         db.session.commit()
@@ -297,20 +322,26 @@ def save_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sh
         db.session.rollback()
         logger.error(f"保存AI审查结果到PostgreSQL时出错 (Commit: {commit_sha}): {e}")
 
-
 def get_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha: str = None):
     """从PostgreSQL获取AI审查结果。"""
     try:
         if commit_sha:
-            result = ReviewResult.query.filter_by(vcs_type=vcs_type, identifier=identifier, pr_mr_id=str(pr_mr_id),
-                commit_sha=commit_sha).first()
+            result = ReviewResult.query.filter_by(
+                vcs_type=vcs_type,
+                identifier=identifier,
+                pr_mr_id=str(pr_mr_id),
+                commit_sha=commit_sha
+            ).first()
             if result:
                 return json.loads(result.review_json)
             return None
         else:
             # 获取PR/MR的所有commits的审查结果
-            results = ReviewResult.query.filter_by(vcs_type=vcs_type, identifier=identifier,
-                pr_mr_id=str(pr_mr_id)).all()
+            results = ReviewResult.query.filter_by(
+                vcs_type=vcs_type,
+                identifier=identifier,
+                pr_mr_id=str(pr_mr_id)
+            ).all()
 
             decoded_results = {}
             project_name_for_pr_mr = None
@@ -333,16 +364,23 @@ def get_review_results(vcs_type: str, identifier: str, pr_mr_id: str, commit_sha
         logger.error(f"从PostgreSQL获取AI审查结果时出错: {e}")
         return None if commit_sha else {}
 
-
 def get_all_reviewed_prs_mrs_keys():
     """获取所有已存储AI审查结果的PR/MR的标识符列表。"""
     try:
         # 获取所有唯一的PR/MR组合
-        results = db.session.query(ReviewResult.vcs_type, ReviewResult.identifier, ReviewResult.pr_mr_id,
+        results = db.session.query(
+            ReviewResult.vcs_type,
+            ReviewResult.identifier,
+            ReviewResult.pr_mr_id,
             db.func.max(ReviewResult.project_name).label('project_name'),
-            db.func.max(ReviewResult.branch).label('branch'), db.func.max(ReviewResult.created_at).label('created_at'),
-            db.func.max(ReviewResult.commit_sha).label('last_commit_sha')).group_by(ReviewResult.vcs_type,
-            ReviewResult.identifier, ReviewResult.pr_mr_id).all()
+            db.func.max(ReviewResult.branch).label('branch'),
+            db.func.max(ReviewResult.created_at).label('created_at'),
+            db.func.max(ReviewResult.commit_sha).label('last_commit_sha')
+        ).group_by(
+            ReviewResult.vcs_type,
+            ReviewResult.identifier,
+            ReviewResult.pr_mr_id
+        ).all()
 
         identifiers = []
         for result in results:
@@ -370,9 +408,16 @@ def get_all_reviewed_prs_mrs_keys():
             else:
                 display_vcs_type_prefix = vcs_type.upper()
 
-            identifiers.append({"vcs_type": vcs_type, "identifier": identifier, "pr_mr_id": pr_mr_id,
-                "display_name": f"{display_vcs_type_prefix}: {project_name} #{pr_mr_id}", "created_at": created_at,
-                "branch": branch or '', "last_commit_sha": last_commit_sha or '', "project_name": project_name})
+            identifiers.append({
+                "vcs_type": vcs_type,
+                "identifier": identifier,
+                "pr_mr_id": pr_mr_id,
+                "display_name": f"{display_vcs_type_prefix}: {project_name} #{pr_mr_id}",
+                "created_at": created_at,
+                "branch": branch or '',
+                "last_commit_sha": last_commit_sha or '',
+                "project_name": project_name
+            })
 
         return identifiers
 
@@ -380,12 +425,14 @@ def get_all_reviewed_prs_mrs_keys():
         logger.error(f"从PostgreSQL获取所有已审查的PR/MR列表时出错: {e}")
         return []
 
-
 def delete_review_results_for_pr_mr(vcs_type: str, identifier: str, pr_mr_id: str):
     """删除特定PR/MR的所有AI审查结果。"""
     try:
-        deleted_count = ReviewResult.query.filter_by(vcs_type=vcs_type, identifier=identifier,
-            pr_mr_id=str(pr_mr_id)).delete()
+        deleted_count = ReviewResult.query.filter_by(
+            vcs_type=vcs_type,
+            identifier=identifier,
+            pr_mr_id=str(pr_mr_id)
+        ).delete()
         db.session.commit()
 
         if deleted_count > 0:

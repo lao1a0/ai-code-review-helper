@@ -1,0 +1,47 @@
+import json
+import logging
+
+from config.core_config import app_configs
+from knowledge.prompt.prompt_loader import get_prompt
+from services.langchain_factory import invoke_chat
+
+logger = logging.getLogger(__name__)
+
+
+def get_openai_code_review_general(file_data: dict):
+    """
+    使用 OpenAI API 对单个文件的代码变更进行粗粒度的审查。
+    接收一个文件数据字典，包含路径、diff、旧内容和新内容。
+    返回一个针对该文件的 Markdown 格式审查意见文本字符串。
+    如果文件无问题，则返回空字符串或特定无问题指示。
+    """
+    if not file_data:
+        logger.info("未提供文件数据以供单个文件的粗粒度审查。")
+        return ""
+
+    try:
+        user_prompt_content_for_llm = json.dumps(file_data, ensure_ascii=False, indent=2)
+    except TypeError as te:
+        logger.error(f"序列化文件 {file_data.get('file_path', 'N/A')} 的粗粒度审查输入数据时出错: {te}")
+        return f"Error serializing input data for general review of file {file_data.get('file_path', 'N/A')}."
+
+    current_model = app_configs.get("OPENAI_MODEL", "gpt-4o")
+    logger.info(f"正在发送文件 {file_data.get('file_path', 'N/A')} 的粗粒度审查请求给 {current_model} (LangChain)...")
+
+    try:
+        general_review_system_prompt = get_prompt('general_review')
+        if "Error: Prompt" in general_review_system_prompt:  # Check if prompt loading failed
+            error_msg = f"无法加载通用审查的 System Prompt。错误: {general_review_system_prompt}"
+            logger.error(error_msg)
+            return error_msg
+
+        review_text = invoke_chat(system_prompt=general_review_system_prompt, user_prompt=user_prompt_content_for_llm,
+            response_format_type=None, )
+
+        logger.info(f"-------------LLM 粗粒度审查输出-----------")
+        logger.info(review_text)
+        logger.info(f"-------------LLM 粗粒度审查输出结束-----------")
+        return review_text
+    except Exception as e:
+        logger.exception("从 OpenAI 获取粗粒度代码审查时出错:")
+        return f"Error during general code review with OpenAI: {e}"
