@@ -4,8 +4,7 @@ from typing import Optional
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
-from config.postgres_config import github_repo_configs, gitlab_project_configs, save_config_to_postgres, \
-    delete_config_from_postgres
+from config.postgres_config import github_repo_configs, gitlab_project_configs
 from services.langchain_factory import get_chat_model
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,6 @@ def build_agent():
             return "secret/token 不能为空。"
         conf = {"secret": secret, "token": token}
         github_repo_configs[repo_full_name] = conf
-        save_config_to_postgres('github', repo_full_name, conf)
         return f"已添加/更新 GitHub 仓库：{repo_full_name}"
 
     @tool
@@ -51,7 +49,6 @@ def build_agent():
         if repo_full_name not in (github_repo_configs or {}):
             return f"未找到 GitHub 仓库配置：{repo_full_name}"
         del github_repo_configs[repo_full_name]
-        delete_config_from_postgres('github', repo_full_name)
         return f"已删除 GitHub 仓库配置：{repo_full_name}"
 
     @tool
@@ -68,7 +65,6 @@ def build_agent():
         if instance_url:
             conf["instance_url"] = str(instance_url).strip()
         gitlab_project_configs[project_id] = conf
-        save_config_to_postgres('gitlab', project_id, conf)
         return f"已添加/更新 GitLab 项目：{project_id}"
 
     @tool
@@ -78,7 +74,6 @@ def build_agent():
         if project_id not in (gitlab_project_configs or {}):
             return f"未找到 GitLab 项目配置：{project_id}"
         del gitlab_project_configs[project_id]
-        delete_config_from_postgres('gitlab', project_id)
         return f"已删除 GitLab 项目配置：{project_id}"
 
     system = ("你是一个用于配置本系统 GitHub/GitLab 的运维助手。\n"

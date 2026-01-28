@@ -2,12 +2,10 @@ import logging
 import os
 
 from flask import Flask, redirect, render_template
-from flask_login import login_required
 
 from config.core_config import SERVER_HOST, SERVER_PORT
 from config.database_config import DatabaseConfig
-from db.models import db, login_manager
-from routes.auth_routes import bp as auth_bp
+from db.models import db
 from routes.config_routes import bp as config_bp
 from routes.console_routes import bp as console_bp
 from routes.webhooks_routes import bp as webhooks_bp
@@ -25,16 +23,11 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-
 
 # 初始化扩展
 db.init_app(app)
-login_manager.init_app(app)
-login_manager.login_view = 'auth.login'
-login_manager.login_message = '请先登录'
-login_manager.login_message_category = 'info'
 
 # One-time init: LLM
 initialize_openai_client()
 
 # 注册蓝图
-app.register_blueprint(auth_bp)
 app.register_blueprint(config_bp)
 app.register_blueprint(console_bp)
 app.register_blueprint(webhooks_bp)
@@ -44,17 +37,14 @@ def _index():
     return render_template("console.html")
 
 @app.get("/review_results")
-@login_required
 def _review_results_page():
     return redirect("/console")
 
 @app.get("/chat")
-@login_required
 def _chat_page():
     return redirect("/console")
 
 @app.get("/admin")
-@login_required
 def _admin_page():
     return redirect("/console")
 

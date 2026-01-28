@@ -369,31 +369,6 @@ async function loadProjects() {
     renderProjectsTable();
 }
 
-async function loadMembers() {
-    const data = await apiFetch('/api/users');
-    window.__USERS = data.users || [];
-    renderMembersTable();
-}
-
-function renderMembersTable() {
-    const tbody = document.querySelector('#membersTable tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    for (const u of (window.__USERS || [])) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${u.id || ''}</td>
-            <td>${u.username || ''}</td>
-            <td>${u.nickname || ''}</td>
-            <td>${u.llm_type || ''}</td>
-            <td>${u.llm_url || ''}</td>
-            <td>${u.created_at || ''}</td>
-            <td>${u.updated_at || ''}</td>
-        `;
-        tbody.appendChild(tr);
-    }
-}
-
 function renderProjectsTable() {
     const tbody = document.querySelector('#projectsTable tbody');
     tbody.innerHTML = '';
@@ -607,7 +582,6 @@ async function init() {
             // Lazy load per page.
             if (page === 'reviews') await loadReviews();
             if (page === 'projects') await loadProjects();
-            if (page === 'members') await loadMembers();
             if (page === 'logs') await loadLogs();
             if (page === 'llm' || page === 'notify') await loadGlobalSettingsIntoUI();
         });
@@ -684,9 +658,6 @@ async function init() {
 
     // Projects
     document.getElementById('btnReloadProjects').addEventListener('click', loadProjects);
-
-    // Members
-    document.getElementById('btnReloadMembers').addEventListener('click', loadMembers);
 
     // LLM / Notify
     document.getElementById('btnReloadLlm').addEventListener('click', loadGlobalSettingsIntoUI);
