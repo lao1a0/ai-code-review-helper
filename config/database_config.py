@@ -16,11 +16,11 @@ class DatabaseConfig:
             return database_url
 
         # 使用单独的环境变量构建连接字符串
-        db_user = os.environ.get('DB_USER', 'postgres')
-        db_password = os.environ.get('DB_PASSWORD', 'postgres')
-        db_host = os.environ.get('DB_HOST', 'localhost')
-        db_port = os.environ.get('DB_PORT', '5432')
-        db_name = os.environ.get('DB_NAME', 'ai_code_review_helper')
+        db_user = os.environ.get('DB_USER')
+        db_password = os.environ.get('DB_PASSWORD')
+        db_host = os.environ.get('DB_HOST')
+        db_port = os.environ.get('DB_PORT')
+        db_name = os.environ.get('DB_NAME')
 
         return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
